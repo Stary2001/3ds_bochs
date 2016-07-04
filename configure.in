@@ -100,6 +100,7 @@ if (test "$with_sdl" != yes) && \
    (test "$with_amigaos" != yes) && \
    (test "$with_carbon" != yes) && \
    (test "$with_wx" != yes) && \
+   (test "$with_3ds" != yes) && \
    (test "$with_macos" != yes); then
   # use DEFAULT_GUI.  Set the appropriate variable.
   # DEFAULT_GUI must be set to one of the names above.  Otherwise, no
@@ -211,6 +212,8 @@ AC_CHECK_MEMBER(struct sockaddr_in.sin_len, AC_DEFINE(BX_HAVE_SOCKADDR_IN_SIN_LE
 AC_CHECK_FUNCS(timelocal, AC_DEFINE(BX_HAVE_TIMELOCAL))
 AC_CHECK_FUNCS(gmtime, AC_DEFINE(BX_HAVE_GMTIME))
 AC_CHECK_FUNCS(mktime, AC_DEFINE(BX_HAVE_MKTIME))
+
+AC_CHECK_FUNCS(svcSleepThread, AC_DEFINE(BX_HAVE_SLEEPTHREAD))
 
 dnl As of autoconf 2.53, the standard largefile test fails for Linux/gcc.
 dnl It does not put the largefiles arguments into CFLAGS, even though Linux/gcc
@@ -2150,6 +2153,10 @@ AC_ARG_WITH(wx,
   [  --with-wx                         use wxWidgets libraries],
   )
 
+AC_ARG_WITH(3ds,
+  [  --with-3ds                         use 3DS libraries],
+  )
+
 AC_ARG_WITH(all-libs,
   [  --with-all-libs                   compile all guis that Bochs supports],
   )
@@ -2513,6 +2520,15 @@ if test "$with_nogui" = yes; then
   GUI_DLL_TARGETS="$GUI_DLL_TARGETS bx_nogui.dll"
   AC_DEFINE(BX_WITH_NOGUI, 1)
   SPECIFIC_GUI_OBJS="$SPECIFIC_GUI_OBJS \$(GUI_OBJS_NOGUI)"
+fi
+
+if test "$with_3ds" = yes; then
+  display_libs="$display_libs 3ds"
+  GUI_DLL_TARGETS="$GUI_DLL_TARGETS bx_3ds.dll"
+  AC_DEFINE(BX_WITH_3DS, 1)
+  AC_DEFINE(BX_DEFAULT_DISPLAY_LIBRARY, "3ds")
+  SPECIFIC_GUI_OBJS="$SPECIFIC_GUI_OBJS \$(GUI_OBJS_3DS)"
+  EXTRA_LINK_OPTS="-lsf2d -lctru"
 fi
 
 AC_MSG_CHECKING(for display libraries)

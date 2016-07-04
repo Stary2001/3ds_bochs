@@ -28,6 +28,12 @@
 #include "iodev/iodev.h"
 #define LOG_THIS BX_MEM(0)->
 
+#if BX_WITH_3DS
+#undef s32
+#include <3ds.h>
+#include <malloc.h>
+#endif
+
 // alignment of memory vector, must be a power of 2
 #define BX_MEM_VECTOR_ALIGN 4096
 #define BX_MEM_HANDLERS   ((BX_CONST64(1) << BX_PHY_ADDRESS_WIDTH) >> 20) /* one per megabyte */
@@ -57,7 +63,11 @@ BX_MEM_C::BX_MEM_C()
 Bit8u* BX_MEM_C::alloc_vector_aligned(Bit32u bytes, Bit32u alignment)
 {
   Bit64u test_mask = alignment - 1;
+#if !BX_WITH_3DS
   BX_MEM_THIS actual_vector = new Bit8u [(Bit32u)(bytes + test_mask)];
+#else
+  BX_MEM_THIS actual_vector = (Bit8u*)malloc((Bit32u)(bytes + test_mask));
+#endif
   if (BX_MEM_THIS actual_vector == 0) {
     BX_PANIC(("alloc_vector_aligned: unable to allocate host RAM !"));
     return 0;
@@ -67,6 +77,7 @@ Bit8u* BX_MEM_C::alloc_vector_aligned(Bit32u bytes, Bit32u alignment)
   Bit64u masked = ((Bit64u)(BX_MEM_THIS actual_vector + test_mask)) & ~test_mask;
   Bit8u *vector = (Bit8u *) masked;
   // sanity check: no lost bits during pointer conversion
+
   assert(sizeof(masked) >= sizeof(vector));
   // sanity check: after realignment, everything fits in allocated space
   assert(vector+bytes <= BX_MEM_THIS actual_vector+bytes+test_mask);

@@ -172,6 +172,7 @@ void bx_devices_c::init(BX_MEM_C *newmem)
     pluginSoundModCtl->init();
   }
 #endif
+
   // PCI logic (i440FX)
   pci.enabled = SIM->get_param_bool(BXPN_PCI_ENABLED)->get();
   if (pci.enabled) {
@@ -198,6 +199,7 @@ void bx_devices_c::init(BX_MEM_C *newmem)
     BX_ERROR(("Bochs is not compiled with PCI support"));
 #endif
   }
+
   PLUG_load_plugin(cmos, PLUGTYPE_CORE);
   PLUG_load_plugin(dma, PLUGTYPE_CORE);
   PLUG_load_plugin(pic, PLUGTYPE_CORE);
@@ -231,7 +233,6 @@ void bx_devices_c::init(BX_MEM_C *newmem)
     }
 #endif
   }
-
   // system hardware
   register_io_read_handler(this, &read_handler, 0x0092,
                            "Port 92h System Control", 1);

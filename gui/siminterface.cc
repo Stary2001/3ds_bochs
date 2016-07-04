@@ -421,11 +421,16 @@ const char *bx_real_sim_c::get_log_level_name(int level)
   return io->getlevel(level);
 }
 
+#if BX_WITH_3DS
+#include <3ds.h>
+#endif
+
 void bx_real_sim_c::quit_sim(int code)
 {
   BX_INFO(("quit_sim called with exit code %d", code));
   exit_code = code;
   io->exit_log();
+#if !BX_WITH_3DS
   // use longjmp to quit cleanly, no matter where in the stack we are.
   if (quit_context != NULL) {
     longjmp(*quit_context, 1);
@@ -436,6 +441,9 @@ void bx_real_sim_c::quit_sim(int code)
       BX_PANIC(("Quit simulation command"));
     ::exit(exit_code);
   }
+#else
+  svcExitProcess();
+#endif
 }
 
 int bx_real_sim_c::get_default_rc(char *path, int len)

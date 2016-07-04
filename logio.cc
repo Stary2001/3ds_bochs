@@ -28,6 +28,11 @@
 #include <Carbon/Carbon.h>
 #endif
 
+#if BX_WITH_3DS
+#undef s32
+#include <3ds.h>
+#endif
+
 // Just for the iofunctions
 
 static int Allocio=0;

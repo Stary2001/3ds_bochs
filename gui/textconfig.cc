@@ -54,6 +54,11 @@ extern "C" {
 #include "siminterface.h"
 #include "extplugin.h"
 
+
+#if BX_WITH_3DS
+#include <3ds.h>
+#endif
+
 #define CI_PATH_LENGTH 512
 
 /* functions for changing particular options */
@@ -89,6 +94,7 @@ char *clean_string(char *s0)
 /* returns 0 on success, -1 on failure.  The value goes into out. */
 int ask_uint(const char *prompt, const char *help, Bit32u min, Bit32u max, Bit32u the_default, Bit32u *out, int base)
 {
+#if !BX_WITH_3DS
   Bit32u n = max + 1;
   char buffer[1024];
   char *clean;
@@ -130,11 +136,45 @@ int ask_uint(const char *prompt, const char *help, Bit32u min, Bit32u max, Bit32
       return 0;
     }
   }
+#else
+  printf(prompt, the_default);
+  unsigned int   i = the_default;
+  printf("%i", the_default);
+  while(1)
+  {
+    hidScanInput();
+    int k = hidKeysDown();
+    if(k & KEY_UP)
+    {
+      if(i > min)
+      {
+        i--;
+        printf("\b%i", i);
+      }
+    }
+
+    if(k & KEY_DOWN)
+    {
+      if(i < max)
+      {
+        i++;
+        printf("\b%i", i);
+      }
+    }
+
+    if(k & KEY_A)
+    {
+      *out = i;
+      return 0;
+    }
+  }
+#endif
 }
 
 // identical to ask_uint, but uses signed comparisons
 int ask_int(const char *prompt, const char *help, Bit32s min, Bit32s max, Bit32s the_default, Bit32s *out)
 {
+#if !BX_WITH_3DS
   int n = max + 1;
   char buffer[1024];
   char *clean;
@@ -165,10 +205,44 @@ int ask_int(const char *prompt, const char *help, Bit32s min, Bit32s max, Bit32s
       return 0;
     }
   }
+#else
+  printf(prompt, the_default);
+  int   i = the_default;
+  printf("%i", the_default);
+  while(1)
+  {
+    hidScanInput();
+    int k = hidKeysDown();
+    if(k & KEY_UP)
+    {
+      if(i > min)
+      {
+        i--;
+        printf("\b%i", i);
+      }
+    }
+
+    if(k & KEY_DOWN)
+    {
+      if(i < max)
+      {
+        i++;
+        printf("\b%i", i);
+      }
+    }
+
+    if(k & KEY_A)
+    {
+      *out = i;
+      return 0;
+    }
+  }
+#endif
 }
 
 int ask_menu(const char *prompt, const char *help, int n_choices, const char *choice[], int the_default, int *out)
 {
+#if !BX_WITH_3DS
   char buffer[1024];
   char *clean;
   int i;
@@ -202,6 +276,40 @@ int ask_menu(const char *prompt, const char *help, int n_choices, const char *ch
     }
     printf("\n");
   }
+
+#else
+    printf(prompt, the_default);
+    int i = the_default;
+      printf("%i", the_default);
+      while(1)
+      {
+        hidScanInput();
+        int k = hidKeysDown();
+        if(k & KEY_UP)
+        {
+          if(i > 1)
+          {
+            i--;
+            printf("\b%i", i);
+          }
+        }
+
+        if(k & KEY_DOWN)
+        {
+          if(i < n_choices)
+          {
+            i++;
+            printf("\b%i", i);
+          }
+        }
+
+        if(k & KEY_A)
+        {
+          *out = i;
+          return 0;
+        }
+      }
+#endif
 }
 
 int ask_yn(const char *prompt, const char *help, Bit32u the_default, Bit32u *out)

@@ -58,6 +58,11 @@ extern "C" {
 bx_bool bx_gui_sighandler = 0;
 #endif
 
+#if BX_WITH_3DS
+#undef s32
+#include <3ds.h>
+#endif
+
 int  bx_init_main(int argc, char *argv[]);
 void bx_init_hardware(void);
 void bx_init_options(void);
@@ -302,6 +307,11 @@ void print_statistics_tree(bx_param_c *node, int level)
 
 int bxmain(void)
 {
+#if BX_WITH_3DS
+  gfxInitDefault();
+  consoleInit(GFX_BOTTOM, NULL);
+#endif
+
 #ifdef HAVE_LOCALE_H
   // Initialize locale (for isprint() and other functions)
   setlocale (LC_ALL, "");
@@ -360,6 +370,14 @@ int bxmain(void)
     fgets(buf, sizeof(buf), stdin);
   }
 #endif
+#if BX_WITH_3DS
+	while(true)
+	{
+		int k = hidKeysDown();
+		if(k & KEY_A) { break;}
+	}
+#endif
+
   BX_INSTR_EXIT_ENV();
   return SIM->get_exit_code();
 }
@@ -936,6 +954,7 @@ bx_bool load_and_init_display_lib(void)
   const char *ci_name = ci_param->get_selected();
   bx_param_enum_c *gui_param = SIM->get_param_enum(BXPN_SEL_DISPLAY_LIBRARY);
   const char *gui_name = gui_param->get_selected();
+
   if (!strcmp(ci_name, "wx")) {
     BX_ERROR(("change of the config interface to wx not implemented yet"));
   }
@@ -999,6 +1018,10 @@ bx_bool load_and_init_display_lib(void)
 #if BX_WITH_X11
   if (!strcmp(gui_name, "x"))
     PLUG_load_plugin (x, PLUGTYPE_OPTIONAL);
+#endif
+#if BX_WITH_3DS
+  if (!strcmp(gui_name, "3ds"))
+    PLUG_load_plugin (3ds, PLUGTYPE_OPTIONAL);
 #endif
 
 #if BX_GUI_SIGHANDLER

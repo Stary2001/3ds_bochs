@@ -44,6 +44,11 @@ typedef int SOCKET;
 #define BX_SER_WIN32
 #endif
 
+#ifdef BX_WITH_3DS
+#include <arpa/inet.h>
+#define SOMAXCONN 1024
+#endif
+
 #include "serial.h"
 
 #if defined(WIN32) && !defined(FILE_FLAG_FIRST_PIPE_INSTANCE)
