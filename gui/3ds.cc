@@ -27,14 +27,16 @@
 #include "bochs.h"
 #include "plugin.h"
 #include "param_names.h"
+#include "iodev.h"
 
 #if BX_WITH_3DS
-
 #include "icon_bochs.h"
 
 #include <3ds.h>
 #include <sf2d.h>
-#include "3ds_font.h"
+#include "3ds_5x8_font.h"
+#include "3ds_8x8_font.h"
+#include "3ds_keymap.h"
 
 class bx_3ds_gui_c : public bx_gui_c {
 public:
@@ -42,16 +44,24 @@ public:
   DECLARE_GUI_VIRTUAL_METHODS()
   DECLARE_GUI_NEW_VIRTUAL_METHODS()
 
-  void draw_char(int x, int y, char c);
+  void vga_draw_char(int x, int y, char c);
+  void font_draw_char(int x, int y, char c);
 
   unsigned int guest_xchars;
   unsigned int guest_ychars;
 
   sf2d_texture *screen_tex;
+  sf2d_texture *font_tex;
+
+  int font_x[NUM_KEYS];
+  int font_y[NUM_KEYS];
+
   Bit32u *screen_data;
 
   double screen_xscale;
   double screen_yscale;
+
+  bool key_state[NUM_KEYS];
 };
 
 // declare one instance of the gui object and call macro to insert the
@@ -115,6 +125,35 @@ void bx_3ds_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
 
   screen_xscale = 1;
   screen_yscale = 1;
+
+  x = 0;
+  y = 0;
+
+  int i;
+
+  font_tex = sf2d_create_texture(256, 256, TEXFMT_RGBA8, SF2D_PLACE_RAM);
+
+  for(i = 0; i < NUM_KEYS; i++)
+  {
+    const char *c = map[i].c[0];
+
+    if(x + strlen(c)*8 >= 256)
+    {
+      x = 0;
+      y+=8;
+    }
+
+    font_x[i] = x;
+    font_y[i] = y;
+
+    while(*c)
+    {
+      font_draw_char(x, y, *c++);
+      x += 8;
+    }
+  }
+
+  sf2d_texture_tile32(font_tex);
 }
 
 
@@ -127,6 +166,40 @@ void bx_3ds_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
 void bx_3ds_gui_c::handle_events(void)
 {
   aptMainLoop();
+  hidScanInput();
+
+  uint32_t a = hidKeysDown();
+  uint32_t b = hidKeysHeld();
+
+  if((a & KEY_TOUCH)) // run on touch
+  {
+    touchPosition p;
+    hidTouchRead(&p);
+
+    int i = 0;
+    for(; i < NUM_KEYS; i++)
+    {
+      if(p.px > map[i].x && p.px < (map[i].x + map[i].w) &&
+        p.py > map[i].y && p.py < (map[i].y + map[i].h))
+      {
+        key_state[i] = !key_state[i];
+        DEV_kbd_gen_scancode(map[i].code);
+      }
+    }
+  }
+  else if(!(b & KEY_TOUCH)) // held?
+  {
+    int i = 0;
+    for(; i < NUM_KEYS; i++)
+    {
+      if(key_state[i])
+      {
+        DEV_kbd_gen_scancode(map[i].code | BX_KEY_RELEASED);
+        key_state[i] = false;
+      }
+    }
+  }
+
   // do a thing.
 }
 
@@ -138,6 +211,20 @@ void bx_3ds_gui_c::handle_events(void)
 
 void bx_3ds_gui_c::flush(void)
 {
+  sf2d_start_frame(GFX_TOP, GFX_LEFT);
+  sf2d_draw_texture(screen_tex, 0, 0);
+  sf2d_end_frame();
+
+  sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
+  int i = 0;
+  for(; i < NUM_KEYS; i++)
+  {
+    sf2d_draw_rectangle(map[i].x, map[i].y, map[i].w, map[i].h, key_state[i] ? RGBA8(0xff, 0, 0, 0xff) : RGBA8(0xff, 0xff, 0xff, 0xff));
+    sf2d_draw_texture_part(font_tex, map[i].x + 2, map[i].y + 2, font_x[i], font_y[i], strlen(map[i].c[0])*8, 8);
+  }
+
+  sf2d_end_frame();
+  sf2d_swapbuffers();
 }
 
 
@@ -170,15 +257,15 @@ void bx_3ds_gui_c::clear_screen(void)
 // tm_info:  this structure contains information for additional
 //           features in text mode (cursor shape, line offset,...)
 
-void bx_3ds_gui_c::draw_char(int x, int y, char c)
+void bx_3ds_gui_c::vga_draw_char(int x, int y, char c)
 {
   if(c > 128)
   {
-          return;
+    return;
   }
 
   uint32_t bytes_per_char = 8;
-  const uint8_t *letter = &font_data[c * bytes_per_char];
+  const uint8_t *letter = &font_5x8_data[c * bytes_per_char];
   uint32_t xp,yp = 0;
 
   for(yp=0 ; yp < 8; yp++)
@@ -195,6 +282,51 @@ void bx_3ds_gui_c::draw_char(int x, int y, char c)
       else
       {
         sf2d_set_pixel(screen_tex, xx, yy, RGBA8(0, 0, 0, 0xff));
+      }
+    }
+  }
+}
+
+void bx_3ds_gui_c::font_draw_char(int x, int y, char c)
+{
+  if(c > 128)
+  {
+    return;
+  }
+
+  uint32_t bytes_per_char = 8;
+  const uint8_t *letter = &font_8x8_data[c * bytes_per_char];
+  uint32_t xp,yp = 0;
+
+  Bit8u *dat = (Bit8u*)font_tex->data;
+
+  for(yp=0 ; yp < 8; yp++)
+  {
+    for(xp=0; xp < 8; xp++)
+    {
+      uint32_t xx = x + xp;
+      uint32_t yy = y + yp;
+
+      if(letter[yp] & (1 << xp))
+      {
+        int ind = (xx + yy * font_tex->pow2_w) * 4;
+        dat[ind] = 0xff;
+        dat[ind+1] = 0xff;
+        dat[ind+2] = 0xff;
+        dat[ind+3] = 0xff;
+
+        // for some reason, this texture ISN'T in z-order?????
+        //sf2d_set_pixel(font_tex, xx, yy, RGBA8(0, 0, 0, 0xff));
+      }
+      else
+      {
+        int ind = (xx + yy * font_tex->pow2_w) * 4;
+        dat[ind] = 0;
+        dat[ind+1] = 0;
+        dat[ind+2] = 0xff;
+        dat[ind+3] = 0xff;
+
+        //sf2d_set_pixel(font_tex, xx, yy, RGBA8(0, 0, 0xff, 0xff));
       }
     }
   }
@@ -232,7 +364,7 @@ void bx_3ds_gui_c::text_update(Bit8u *old_text, Bit8u *new_text,
         ch = new_text[0];
         //if ((new_text[1] & 0x08) > 0) ch |= A_BOLD;
         //if ((new_text[1] & 0x80) > 0) ch |= A_BLINK;
-        draw_char(x, y, ch);
+        vga_draw_char(x, y, ch);
       }
       x++;
       new_text+=2;
@@ -258,7 +390,7 @@ void bx_3ds_gui_c::text_update(Bit8u *old_text, Bit8u *new_text,
     }
 #endif
     ch = new_start[cursor_y*tm_info->line_offset+cursor_x*2];
-    draw_char(x, y, ch);
+    vga_draw_char(x, y, ch);
     //curs_set(2);
   } else {
     //curs_set(0);

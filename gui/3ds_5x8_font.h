@@ -1,4 +1,4 @@
-unsigned char font_data[] = {
+unsigned char font_5x8_data[] = {
 
     /*
      * code=0, hex=0x00, ascii="^@"
