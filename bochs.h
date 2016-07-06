@@ -544,18 +544,14 @@ BX_CPP_INLINE Bit64u bx_bswap64(Bit64u val64)
 #undef ReadHostQWordFromLittleEndian
 
 #define WriteHostQWordToLittleEndian(hostPtr, nativeVar64) {       \
-    BX_INFO(("fuck balls write %016llx", nativeVar64)); \
     *((Bit32u*)(hostPtr) + 1) = ((nativeVar64) & 0xFFFFFFFF00000000) >> 32; \
     *((Bit32u*)(hostPtr)) = (nativeVar64) & 0xFFFFFFFF; \
-    BX_INFO(("k done writing %016llx", *((Bit64u*)(hostPtr)))); \
 }
 
   //BX_INFO(("fuck balls read %016llx", *((Bit64u*)(hostPtr))));
 
 #define ReadHostQWordFromLittleEndian(hostPtr, nativeVar64) {       \
-    BX_INFO(("read")); \
     (nativeVar64) = *((Bit32u*)(hostPtr)) | (((Bit64u)(*((Bit32u*)(hostPtr) + 1))) << 32); \
-    BX_INFO(("k done reading %016llx", nativeVar64)); \
 }
 
 #endif
