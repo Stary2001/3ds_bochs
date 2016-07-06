@@ -330,7 +330,7 @@ void bx_3ds_gui_c::flush(void)
     sf2d_draw_rectangle(map[i].x, map[i].y, map[i].w, map[i].h, active ? RGBA8(0xff, 0, 0, 0xff) : RGBA8(0xff, 0xff, 0xff, 0xff));
     sf2d_draw_texture_part(font_tex, map[i].x + 2, map[i].y + 2, font_x[i*2 + (int)shift], font_y[i*2 + (int)shift], strlen(map[i].c[(int)shift])*8, 8);
   }
-  
+
   sf2d_end_frame();
   sf2d_swapbuffers();
 }
@@ -441,24 +441,26 @@ void bx_3ds_gui_c::text_update(Bit8u *old_text, Bit8u *new_text,
         unsigned long cursor_x, unsigned long cursor_y,
         bx_vga_tminfo_t *tm_info)
 {
-  const int vga_colours[] = 
+  // 0xRRGGBBAA is used for texture writes
+
+  const u32 vga_colours[] =
   {
-    RGBA8(0, 0, 0, 0xff),
-    RGBA8(0, 0, 170, 0xff), // blue
-    RGBA8(0, 170, 0, 0xff), // green
-    RGBA8(0, 170, 170, 0xff), // cyan
-    RGBA8(170, 0, 0, 0xff), // red
-    RGBA8(170, 0, 170, 0xff), // magenta
-    RGBA8(170, 85, 0, 0xff), // brown
-    RGBA8(170, 170, 170, 0xff), // grey
-    RGBA8(85, 85, 85, 0xff), // dark grey
-    RGBA8(85, 85, 255, 0xff), // bright blue
-    RGBA8(85, 255, 85, 0xff), // bright green
-    RGBA8(85, 255, 255, 0xff), // bright cyan
-    RGBA8(255, 85, 85, 0xff), // bright red
-    RGBA8(255, 85, 255, 0xff), // bright magenta
-    RGBA8(255, 255, 85, 0xff), // yellow
-    RGBA8(255, 255, 255, 0xff), // white
+    0x000000ff, // black #000000
+    0x0000aaff, // blue #0000aa
+    0x00aa00ff, // green #00aa00
+    0x00aaaaff, // cyan #00aaaa
+    0xaa0000ff, // red #aa0000
+    0xaa00aaff, // magenta #aa00aa
+    0xaa5500ff, // brown #aa5500
+    0xaaaaaaff, // grey #aaaaaa
+    0x555555ff, // dark grey #555555
+    0x5555ffff, // bright blue #5555ff
+    0x55ff55ff, // bright green #55ff55
+    0x55ffffff, // bright cyan #55ffff
+    0xff5555ff, // bright red #ff5555
+    0xff55ffff, // bright magenta #ff55ff
+    0xffff55ff, // yellow #ffff55
+    0xffffffff // white #ffffff
   };
 
   unsigned char *old_line, *new_line, *new_start;
@@ -523,11 +525,7 @@ void bx_3ds_gui_c::text_update(Bit8u *old_text, Bit8u *new_text,
     //curs_set(0);
   }
 
-  //sf2d_texture_tile32(screen_tex);
-  sf2d_start_frame(GFX_TOP, GFX_LEFT);
-  sf2d_draw_texture(screen_tex, 0, 0);
-  sf2d_end_frame();
-  sf2d_swapbuffers();
+  sf2d_texture_tile32(screen_tex);
 }
 
 
