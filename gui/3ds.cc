@@ -53,8 +53,8 @@ public:
   sf2d_texture *screen_tex;
   sf2d_texture *font_tex;
 
-  int font_x[NUM_KEYS];
-  int font_y[NUM_KEYS];
+  int font_x[NUM_KEYS * 2];
+  int font_y[NUM_KEYS * 2];
 
   Bit32u *screen_data;
 
@@ -62,6 +62,13 @@ public:
   double screen_yscale;
 
   bool key_state[NUM_KEYS];
+  bool shift;
+  bool ctrl;
+  bool alt;
+  bool win;
+
+  u32 vga_fg;
+  u32 vga_bg;
 };
 
 // declare one instance of the gui object and call macro to insert the
@@ -133,14 +140,14 @@ void bx_3ds_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
 
   font_tex = sf2d_create_texture(256, 256, TEXFMT_RGBA8, SF2D_PLACE_RAM);
 
-  for(i = 0; i < NUM_KEYS; i++)
+  for(i = 0; i < NUM_KEYS*2; i+=2)
   {
-    const char *c = map[i].c[0];
+    const char *c = map[i/2].c[0];
 
-    if(x + strlen(c)*8 >= 256)
+    if(x + strlen(c) * 8 >= 256)
     {
       x = 0;
-      y+=8;
+      y += 8;
     }
 
     font_x[i] = x;
@@ -151,9 +158,30 @@ void bx_3ds_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
       font_draw_char(x, y, *c++);
       x += 8;
     }
+
+    c = map[i/2].c[1];
+
+    if(x + strlen(c)*8 >= 256)
+    {
+      x = 0;
+      y+=8;
+    }
+
+    font_x[i + 1] = x;
+    font_y[i + 1] = y;
+
+    while(*c)
+    {
+      font_draw_char(x, y, *c++);
+      x += 8;
+    }
   }
 
   sf2d_texture_tile32(font_tex);
+  shift = false;
+  ctrl = false;
+  alt = false;
+  win = false;
 }
 
 
@@ -177,13 +205,51 @@ void bx_3ds_gui_c::handle_events(void)
     hidTouchRead(&p);
 
     int i = 0;
+    int j = 0;
+
     for(; i < NUM_KEYS; i++)
     {
       if(p.px > map[i].x && p.px < (map[i].x + map[i].w) &&
         p.py > map[i].y && p.py < (map[i].y + map[i].h))
       {
-        key_state[i] = !key_state[i];
-        DEV_kbd_gen_scancode(map[i].code);
+        if(map[i].flags & KEY_SHIFT)
+        {
+          shift = !shift;
+        }
+        else if(map[i].flags & KEY_CTRL)
+        {
+          ctrl = !ctrl;
+        }
+        else if(map[i].flags & KEY_ALT)
+        {
+          alt = !alt;
+        }
+        else if(map[i].flags & KEY_WIN)
+        {
+          win = !win;
+        }
+        else
+        {
+          key_state[i] = !key_state[i];
+          if(shift)
+          {
+            DEV_kbd_gen_scancode(BX_KEY_SHIFT_L);
+          }
+          if(ctrl)
+          {
+            DEV_kbd_gen_scancode(BX_KEY_CTRL_L);
+          }
+          if(alt)
+          {
+            DEV_kbd_gen_scancode(BX_KEY_ALT_L);
+          }
+          if(win)
+          {
+            DEV_kbd_gen_scancode(BX_KEY_WIN_L);
+          }
+
+          DEV_kbd_gen_scancode(map[i].code);
+        }
       }
     }
   }
@@ -192,8 +258,32 @@ void bx_3ds_gui_c::handle_events(void)
     int i = 0;
     for(; i < NUM_KEYS; i++)
     {
-      if(key_state[i])
+      if(key_state[i] && !(map[i].flags & KEY_STICKY))
       {
+        if(shift)
+        {
+          DEV_kbd_gen_scancode(BX_KEY_SHIFT_L | BX_KEY_RELEASED);
+          shift = false;
+        }
+
+        if(ctrl)
+        {
+          DEV_kbd_gen_scancode(BX_KEY_CTRL_L | BX_KEY_RELEASED);
+          ctrl = false;
+        }
+
+        if(alt)
+        {
+          DEV_kbd_gen_scancode(BX_KEY_ALT_L | BX_KEY_RELEASED);
+          alt = false;
+        }
+
+        if(win)
+        {
+          DEV_kbd_gen_scancode(BX_KEY_WIN_L | BX_KEY_RELEASED);
+          win = false;
+        }
+
         DEV_kbd_gen_scancode(map[i].code | BX_KEY_RELEASED);
         key_state[i] = false;
       }
@@ -219,10 +309,28 @@ void bx_3ds_gui_c::flush(void)
   int i = 0;
   for(; i < NUM_KEYS; i++)
   {
-    sf2d_draw_rectangle(map[i].x, map[i].y, map[i].w, map[i].h, key_state[i] ? RGBA8(0xff, 0, 0, 0xff) : RGBA8(0xff, 0xff, 0xff, 0xff));
-    sf2d_draw_texture_part(font_tex, map[i].x + 2, map[i].y + 2, font_x[i], font_y[i], strlen(map[i].c[0])*8, 8);
-  }
+    bool active = key_state[i];
+    if(map[i].flags & KEY_SHIFT)
+    {
+      active = shift;
+    }
+    if(map[i].flags & KEY_CTRL)
+    {
+      active = ctrl;
+    }
+    if(map[i].flags & KEY_ALT)
+    {
+      active = alt;
+    }
+    if(map[i].flags & KEY_WIN)
+    {
+      active = win;
+    }
 
+    sf2d_draw_rectangle(map[i].x, map[i].y, map[i].w, map[i].h, active ? RGBA8(0xff, 0, 0, 0xff) : RGBA8(0xff, 0xff, 0xff, 0xff));
+    sf2d_draw_texture_part(font_tex, map[i].x + 2, map[i].y + 2, font_x[i*2 + (int)shift], font_y[i*2 + (int)shift], strlen(map[i].c[(int)shift])*8, 8);
+  }
+  
   sf2d_end_frame();
   sf2d_swapbuffers();
 }
@@ -259,11 +367,6 @@ void bx_3ds_gui_c::clear_screen(void)
 
 void bx_3ds_gui_c::vga_draw_char(int x, int y, char c)
 {
-  if(c > 128)
-  {
-    return;
-  }
-
   uint32_t bytes_per_char = 8;
   const uint8_t *letter = &font_5x8_data[c * bytes_per_char];
   uint32_t xp,yp = 0;
@@ -277,11 +380,11 @@ void bx_3ds_gui_c::vga_draw_char(int x, int y, char c)
 
       if(letter[yp + ((xp / 5) * bytes_per_char)] & (1 << (7 - xp)))
       {
-        sf2d_set_pixel(screen_tex, xx, yy, RGBA8(0xff, 0xff, 0xff, 0xff));
+        sf2d_set_pixel(screen_tex, xx, yy, vga_fg);
       }
       else
       {
-        sf2d_set_pixel(screen_tex, xx, yy, RGBA8(0, 0, 0, 0xff));
+        sf2d_set_pixel(screen_tex, xx, yy, vga_bg);
       }
     }
   }
@@ -338,6 +441,26 @@ void bx_3ds_gui_c::text_update(Bit8u *old_text, Bit8u *new_text,
         unsigned long cursor_x, unsigned long cursor_y,
         bx_vga_tminfo_t *tm_info)
 {
+  const int vga_colours[] = 
+  {
+    RGBA8(0, 0, 0, 0xff),
+    RGBA8(0, 0, 170, 0xff), // blue
+    RGBA8(0, 170, 0, 0xff), // green
+    RGBA8(0, 170, 170, 0xff), // cyan
+    RGBA8(170, 0, 0, 0xff), // red
+    RGBA8(170, 0, 170, 0xff), // magenta
+    RGBA8(170, 85, 0, 0xff), // brown
+    RGBA8(170, 170, 170, 0xff), // grey
+    RGBA8(85, 85, 85, 0xff), // dark grey
+    RGBA8(85, 85, 255, 0xff), // bright blue
+    RGBA8(85, 255, 85, 0xff), // bright green
+    RGBA8(85, 255, 255, 0xff), // bright cyan
+    RGBA8(255, 85, 85, 0xff), // bright red
+    RGBA8(255, 85, 255, 0xff), // bright magenta
+    RGBA8(255, 255, 85, 0xff), // yellow
+    RGBA8(255, 255, 255, 0xff), // white
+  };
+
   unsigned char *old_line, *new_line, *new_start;
   unsigned char cAttr;
   unsigned int hchars, rows, x, y;
@@ -360,6 +483,11 @@ void bx_3ds_gui_c::text_update(Bit8u *old_text, Bit8u *new_text,
     do {
       if (force_update || (old_text[0] != new_text[0])
           || (old_text[1] != new_text[1])) {
+        
+        vga_fg = vga_colours[new_text[1] & 0xf];
+        vga_bg = vga_colours[(new_text[1] & 0xf0) >> 8];
+
+        BX_INFO(("col %02x gives #%02x%02x%02x #%02x%02x%02x", new_text[1], RGBA8_GET_R(vga_fg), RGBA8_GET_G(vga_fg), RGBA8_GET_B(vga_fg), RGBA8_GET_R(vga_bg), RGBA8_GET_G(vga_bg), RGBA8_GET_B(vga_bg)));
 
         ch = new_text[0];
         //if ((new_text[1] & 0x08) > 0) ch |= A_BOLD;
@@ -383,12 +511,11 @@ void bx_3ds_gui_c::text_update(Bit8u *old_text, Bit8u *new_text,
       cursor_x=25-1;
       cursor_y--;
     }
+
     cAttr = new_start[cursor_y*tm_info->line_offset+cursor_x*2+1];
-#if BX_HAVE_COLOR_SET
-    if (has_colors()) {
-      color_set(get_color_pair(cAttr), NULL);
-    }
-#endif
+    vga_fg = vga_colours[cAttr & 0xf];
+    vga_bg = vga_colours[(cAttr & 0xf0) >> 8];
+
     ch = new_start[cursor_y*tm_info->line_offset+cursor_x*2];
     vga_draw_char(x, y, ch);
     //curs_set(2);
