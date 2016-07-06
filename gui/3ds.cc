@@ -69,6 +69,8 @@ public:
 
   u32 vga_fg;
   u32 vga_bg;
+
+  u32 palette[256];
 };
 
 // declare one instance of the gui object and call macro to insert the
@@ -205,7 +207,6 @@ void bx_3ds_gui_c::handle_events(void)
     hidTouchRead(&p);
 
     int i = 0;
-    int j = 0;
 
     for(; i < NUM_KEYS; i++)
     {
@@ -302,7 +303,7 @@ void bx_3ds_gui_c::handle_events(void)
 void bx_3ds_gui_c::flush(void)
 {
   sf2d_start_frame(GFX_TOP, GFX_LEFT);
-  sf2d_draw_texture(screen_tex, 0, 0);
+  sf2d_draw_texture_scale(screen_tex, 0, 0, screen_xscale, screen_yscale);
   sf2d_end_frame();
 
   sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
@@ -403,6 +404,8 @@ void bx_3ds_gui_c::font_draw_char(int x, int y, char c)
 
   Bit8u *dat = (Bit8u*)font_tex->data;
 
+  // This one isn't in z-order. apparently. cool.
+
   for(yp=0 ; yp < 8; yp++)
   {
     for(xp=0; xp < 8; xp++)
@@ -417,9 +420,6 @@ void bx_3ds_gui_c::font_draw_char(int x, int y, char c)
         dat[ind+1] = 0xff;
         dat[ind+2] = 0xff;
         dat[ind+3] = 0xff;
-
-        // for some reason, this texture ISN'T in z-order?????
-        //sf2d_set_pixel(font_tex, xx, yy, RGBA8(0, 0, 0, 0xff));
       }
       else
       {
@@ -428,8 +428,6 @@ void bx_3ds_gui_c::font_draw_char(int x, int y, char c)
         dat[ind+1] = 0;
         dat[ind+2] = 0xff;
         dat[ind+3] = 0xff;
-
-        //sf2d_set_pixel(font_tex, xx, yy, RGBA8(0, 0, 0xff, 0xff));
       }
     }
   }
@@ -487,9 +485,7 @@ void bx_3ds_gui_c::text_update(Bit8u *old_text, Bit8u *new_text,
           || (old_text[1] != new_text[1])) {
         
         vga_fg = vga_colours[new_text[1] & 0xf];
-        vga_bg = vga_colours[(new_text[1] & 0xf0) >> 8];
-
-        BX_INFO(("col %02x gives #%02x%02x%02x #%02x%02x%02x", new_text[1], RGBA8_GET_R(vga_fg), RGBA8_GET_G(vga_fg), RGBA8_GET_B(vga_fg), RGBA8_GET_R(vga_bg), RGBA8_GET_G(vga_bg), RGBA8_GET_B(vga_bg)));
+        vga_bg = vga_colours[(new_text[1] & 0x70) >> 4];
 
         ch = new_text[0];
         //if ((new_text[1] & 0x08) > 0) ch |= A_BOLD;
@@ -564,10 +560,8 @@ int bx_3ds_gui_c::set_clipboard_text(char *text_snapshot, Bit32u len)
 
 bx_bool bx_3ds_gui_c::palette_change(Bit8u index, Bit8u red, Bit8u green, Bit8u blue)
 {
-  UNUSED(index);
-  UNUSED(red);
-  UNUSED(green);
-  UNUSED(blue);
+  palette[index] = red | green << 8 | blue << 16 | 0xff000000;;
+
   return(0);
 }
 
@@ -589,24 +583,52 @@ bx_bool bx_3ds_gui_c::palette_change(Bit8u index, Bit8u red, Bit8u green, Bit8u 
 
 void bx_3ds_gui_c::graphics_tile_update(Bit8u *tile, unsigned x0, unsigned y0)
 {
-  UNUSED(tile);
-  UNUSED(x0);
-  UNUSED(y0);
+  int x = 0;
+  int y = 0;
+  int i = 0;
+
+  for(; y < y_tilesize; y++)
+  {
+    for(x = 0; x < x_tilesize; x++)
+    {
+      sf2d_set_pixel(screen_tex, x0 + x, y0 + y, palette[tile[i]]);
+      i++;
+    }
+  }
 }
 
 bx_svga_tileinfo_t * bx_3ds_gui_c::graphics_tile_info(bx_svga_tileinfo_t *info)
 {
-  UNUSED(info);
-  return nullptr;
+  info->bpp = 32;
+  info->pitch = screen_tex->pow2_w * 4;
+  info->red_shift = 
+  info->green_shift = 
+  info->blue_shift = 
+  info->red_mask = 0xff;
+  info->green_mask = 0xff00;
+  info->blue_mask = 0xff0000;
+  info->is_indexed = false;
+  info->is_little_endian = 1;
+
+  return info;
 }
 
 Bit8u * bx_3ds_gui_c::graphics_tile_get(unsigned x, unsigned y, unsigned *w, unsigned *h)
 {
-  UNUSED(x);
-  UNUSED(y);
-  UNUSED(w);
-  UNUSED(h);
-  return nullptr;
+  if (x + x_tilesize > screen_tex->width) {
+    *w = screen_tex->width - x;
+  } else {
+    *w = x_tilesize;
+  }
+
+  if (y + y_tilesize > screen_tex->height) {
+    *h = screen_tex->height - y;
+  } else {
+    *h = y_tilesize;
+  }
+
+  Bit8u *dat = (Bit8u*)screen_tex->data;
+  return dat + (y * screen_tex->pow2_w * 4 + (x * 4));
 }
 
 void bx_3ds_gui_c::graphics_tile_update_in_place(unsigned x, unsigned y, unsigned w, unsigned h)
@@ -615,6 +637,8 @@ void bx_3ds_gui_c::graphics_tile_update_in_place(unsigned x, unsigned y, unsigne
   UNUSED(y);
   UNUSED(w);
   UNUSED(h);
+
+  // Just do nothing. It's fine. Really.
 }
 
 
@@ -641,7 +665,14 @@ void bx_3ds_gui_c::dimension_update(unsigned x, unsigned y, unsigned fheight, un
   guest_xres = x;
   guest_yres = y;
   guest_bpp = bpp;
-  UNUSED(fwidth);
+
+  if(!guest_textmode)
+  {
+    sf2d_free_texture(screen_tex);
+    screen_tex = sf2d_create_texture(x, y, TEXFMT_RGBA8, SF2D_PLACE_RAM);
+    screen_xscale = 400.0 / x;
+    screen_yscale = 240.0 / y;
+  }
 }
 
 
