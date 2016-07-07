@@ -487,7 +487,7 @@ void bx_3ds_gui_c::text_update(Bit8u *old_text, Bit8u *new_text,
           || (old_text[1] != new_text[1])) {
         
         vga_fg = vga_colours[new_text[1] & 0xf];
-        vga_bg = vga_colours[(new_text[1] & 0x70) >> 4];
+        vga_bg = vga_colours[(new_text[1] & 0xf0) >> 4];
 
         ch = new_text[0];
         //if ((new_text[1] & 0x08) > 0) ch |= A_BOLD;
