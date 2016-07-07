@@ -562,8 +562,8 @@ int bx_3ds_gui_c::set_clipboard_text(char *text_snapshot, Bit32u len)
 
 bx_bool bx_3ds_gui_c::palette_change(Bit8u index, Bit8u red, Bit8u green, Bit8u blue)
 {
-  palette[index] = red | green << 8 | blue << 16 | 0xff000000;;
-
+  // 0xRRGGBBAA
+  palette[index] = red << 24 | green << 16 | blue << 8 | 0xff;
   return(0);
 }
 
@@ -588,15 +588,18 @@ void bx_3ds_gui_c::graphics_tile_update(Bit8u *tile, unsigned x0, unsigned y0)
   int x = 0;
   int y = 0;
   int i = 0;
+  Bit32u *dat = (Bit32u*)screen_fb;
 
   for(; y < y_tilesize; y++)
   {
     for(x = 0; x < x_tilesize; x++)
     {
-      sf2d_set_pixel(screen_tex, x0 + x, y0 + y, palette[tile[i]]);
+      int ind = (x0 + x) + ((y0+y) * screen_tex->pow2_w);
+      dat[ind] = palette[tile[i]];
       i++;
     }
   }
+  tile_screen();
 }
 
 bx_svga_tileinfo_t * bx_3ds_gui_c::graphics_tile_info(bx_svga_tileinfo_t *info)
@@ -683,6 +686,8 @@ void bx_3ds_gui_c::dimension_update(unsigned x, unsigned y, unsigned fheight, un
     screen_xscale = 400.0 / x;
     screen_yscale = 240.0 / y;
   }
+
+  BX_INFO(("mode switch to %i by %i at %i bpp, text mode: %i", x, y, bpp, (int)guest_textmode));
 }
 
 
