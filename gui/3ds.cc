@@ -46,10 +46,12 @@ public:
 
   void vga_draw_char(int x, int y, char c);
   void font_draw_char(int x, int y, char c);
+  void tile_screen();
 
   unsigned int guest_xchars;
   unsigned int guest_ychars;
 
+  void *screen_fb;
   sf2d_texture *screen_tex;
   sf2d_texture *font_tex;
 
@@ -120,23 +122,14 @@ void bx_3ds_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
 
   sf2d_init();
   screen_tex = sf2d_create_texture(400, 240, TEXFMT_RGBA8, SF2D_PLACE_RAM);
-  screen_data = (Bit32u*)screen_tex->data;
-
-  int x, y;
-  for(y = 0; y < 240; y++)
-  {
-    for(x = 0; x < 400; x++)
-    {
-      screen_data[x + y * screen_tex->pow2_w] = RGBA8(0, 0, 0, 0xff);
-    }
-  }
-  sf2d_texture_tile32(screen_tex);
-
+  screen_fb = linearAlloc(screen_tex->pow2_w * screen_tex->pow2_h * 4);
+  memset(screen_fb, 0, screen_tex->pow2_w * screen_tex->pow2_h * 4);
+  tile_screen();
   screen_xscale = 1;
   screen_yscale = 1;
 
-  x = 0;
-  y = 0;
+  int x = 0;
+  int y = 0;
 
   int i;
 
@@ -186,6 +179,12 @@ void bx_3ds_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
   win = false;
 }
 
+extern "C" void sf2d_texture_tile32_hardware(sf2d_texture *texture, const void *data, int w, int h);
+void bx_3ds_gui_c::tile_screen()
+{
+  screen_tex->tiled = false;
+  sf2d_texture_tile32_hardware(screen_tex, screen_fb, screen_tex->pow2_w, screen_tex->pow2_h);
+}
 
 // ::HANDLE_EVENTS()
 //
@@ -372,6 +371,8 @@ void bx_3ds_gui_c::vga_draw_char(int x, int y, char c)
   const uint8_t *letter = &font_5x8_data[c * bytes_per_char];
   uint32_t xp,yp = 0;
 
+  Bit32u *dat = (Bit32u*)screen_fb;
+
   for(yp=0 ; yp < 8; yp++)
   {
     for(xp=0; xp < 5; xp++)
@@ -379,13 +380,14 @@ void bx_3ds_gui_c::vga_draw_char(int x, int y, char c)
       uint32_t xx = (x*5) + xp;
       uint32_t yy = (y * 8) + yp;
 
+      int ind = xx + yy * screen_tex->pow2_w;
       if(letter[yp + ((xp / 5) * bytes_per_char)] & (1 << (7 - xp)))
       {
-        sf2d_set_pixel(screen_tex, xx, yy, vga_fg);
+        dat[ind] = vga_fg;
       }
       else
       {
-        sf2d_set_pixel(screen_tex, xx, yy, vga_bg);
+        dat[ind] = vga_bg;
       }
     }
   }
@@ -521,7 +523,7 @@ void bx_3ds_gui_c::text_update(Bit8u *old_text, Bit8u *new_text,
     //curs_set(0);
   }
 
-  sf2d_texture_tile32(screen_tex);
+  tile_screen();
 }
 
 
@@ -601,12 +603,13 @@ bx_svga_tileinfo_t * bx_3ds_gui_c::graphics_tile_info(bx_svga_tileinfo_t *info)
 {
   info->bpp = 32;
   info->pitch = screen_tex->pow2_w * 4;
-  info->red_shift = 
-  info->green_shift = 
-  info->blue_shift = 
-  info->red_mask = 0xff;
-  info->green_mask = 0xff00;
-  info->blue_mask = 0xff0000;
+  info->red_shift = 24;
+  info->green_shift = 16;
+  info->blue_shift = 8;
+  info->red_mask =   0xff000000;
+  info->green_mask = 0x00ff0000;
+  info->blue_mask =  0x0000ff00;
+
   info->is_indexed = false;
   info->is_little_endian = 1;
 
@@ -657,19 +660,26 @@ void bx_3ds_gui_c::graphics_tile_update_in_place(unsigned x, unsigned y, unsigne
 void bx_3ds_gui_c::dimension_update(unsigned x, unsigned y, unsigned fheight, unsigned fwidth, unsigned bpp)
 {
   guest_textmode = (fheight > 0);
-  if(guest_textmode)
-  {
-    guest_xchars = x / fwidth;
-    guest_ychars = y / fheight;
-  }
   guest_xres = x;
   guest_yres = y;
   guest_bpp = bpp;
 
-  if(!guest_textmode)
+  if(guest_textmode)
+  {
+    guest_xchars = x / fwidth;
+    guest_ychars = y / fheight;
+    screen_xscale = 1.0;
+    screen_yscale = 1.0;
+  }
+  else
   {
     sf2d_free_texture(screen_tex);
     screen_tex = sf2d_create_texture(x, y, TEXFMT_RGBA8, SF2D_PLACE_RAM);
+
+    linearFree(screen_fb);
+    screen_fb = linearAlloc(screen_tex->pow2_w * screen_tex->pow2_h * 4);
+    memset(screen_fb, 0, screen_tex->pow2_w * screen_tex->pow2_h * 4);
+    tile_screen();
     screen_xscale = 400.0 / x;
     screen_yscale = 240.0 / y;
   }
