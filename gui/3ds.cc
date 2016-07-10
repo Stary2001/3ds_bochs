@@ -1,8 +1,5 @@
-/////////////////////////////////////////////////////////////////////////
-// $Id: 3ds.cc 12081 2013-12-29 12:56:52Z vruppert $
-/////////////////////////////////////////////////////////////////////////
-//
-//  Copyright (C) 2001-2013  The Bochs Project
+
+//  Copyright (C) 2016  The Bochs Project
 //
 //  This library is free software; you can redistribute it and/or
 //  modify it under the terms of the GNU Lesser General Public
@@ -37,6 +34,29 @@
 #include "3ds_5x8_font.h"
 #include "3ds_8x8_font.h"
 #include "3ds_keymap.h"
+#include "3ds_font.h"
+
+#define NUM_SCR_MODES 2
+#define NUM_INP_MODES 2
+
+#define SCR_SCALE 0
+#define SCR_PAN 1
+#define INP_KEYBOARD 0
+#define INP_MOUSE 1
+
+#define NUM_BITMAPS 16
+
+const char *screen_mode_names[] =
+{
+  "Scale",
+  "Pan"
+};
+
+const char *input_mode_names[] =
+{
+  "Keyboard",
+  "Mouse"
+};
 
 class bx_3ds_gui_c : public bx_gui_c {
 public:
@@ -53,26 +73,33 @@ public:
 
   void *screen_fb;
   sf2d_texture *screen_tex;
-  sf2d_texture *font_tex;
-
-  int font_x[NUM_KEYS * 2];
-  int font_y[NUM_KEYS * 2];
-
-  Bit32u *screen_data;
-
   double screen_xscale;
   double screen_yscale;
+
+  Font *font;
+  sf2d_texture *font_tex;
+  FontStr key_caps[NUM_KEYS * 2];
+  int current_screen_mode;
+  int current_input_mode;
+
+  FontStr screen_mode_strs[NUM_SCR_MODES];
+  FontStr input_mode_strs[NUM_INP_MODES];
+  FontStr static_strs[2];
 
   bool key_state[NUM_KEYS];
   bool shift;
   bool ctrl;
   bool alt;
-  bool win;
 
   u32 vga_fg;
   u32 vga_bg;
 
   u32 palette[256];
+
+  sf2d_texture *bar_bitmaps[NUM_BITMAPS];
+
+  u32 pan_x;
+  u32 pan_y;
 };
 
 // declare one instance of the gui object and call macro to insert the
@@ -82,30 +109,6 @@ IMPLEMENT_GUI_PLUGIN_CODE(3ds)
 
 #define LOG_THIS theGui->
 
-// This file defines stubs for the GUI interface, which is a
-// place to start if you want to port bochs to a platform, for
-// which there is no support for your native GUI, or if you want to compile
-// bochs without any native GUI support (no output window or
-// keyboard input will be possible).
-// Look in 'x.cc', 'carbon.cc', and 'win32.cc' for specific
-// implementations of this interface.  -Kevin
-
-
-
-// ::SPECIFIC_INIT()
-//
-// Called from gui.cc, once upon program startup, to allow for the
-// specific GUI code (X11, Win32, ...) to be initialized.
-//
-// argc, argv: these arguments can be used to initialize the GUI with
-//     specific options (X11 options, Win32 options,...)
-//
-// headerbar_y:  A headerbar (toolbar) is display on the top of the
-//     VGA window, showing floppy status, and other information.  It
-//     always assumes the width of the current VGA mode width, but
-//     it's height is defined by this parameter.
-
-
 void bx_3ds_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
 {
   BX_INFO(("bx_3ds_gui_c::specific_init"));
@@ -113,10 +116,10 @@ void bx_3ds_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
   UNUSED(argc);
   UNUSED(argv);
   UNUSED(headerbar_y);
-
   UNUSED(bochs_icon_bits);  // global variable
 
-  if (SIM->get_param_bool(BXPN_PRIVATE_COLORMAP)->get()) {
+  if (SIM->get_param_bool(BXPN_PRIVATE_COLORMAP)->get())
+  {
     BX_INFO(("private_colormap option ignored."));
   }
 
@@ -125,58 +128,41 @@ void bx_3ds_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
   screen_fb = linearAlloc(screen_tex->pow2_w * screen_tex->pow2_h * 4);
   memset(screen_fb, 0, screen_tex->pow2_w * screen_tex->pow2_h * 4);
   tile_screen();
+
   screen_xscale = 1;
   screen_yscale = 1;
-
-  int x = 0;
-  int y = 0;
 
   int i;
 
   font_tex = sf2d_create_texture(256, 256, TEXFMT_RGBA8, SF2D_PLACE_RAM);
+  font = new Font(font_tex, font_8x8_data);
 
   for(i = 0; i < NUM_KEYS*2; i+=2)
   {
-    const char *c = map[i/2].c[0];
-
-    if(x + strlen(c) * 8 >= 256)
-    {
-      x = 0;
-      y += 8;
-    }
-
-    font_x[i] = x;
-    font_y[i] = y;
-
-    while(*c)
-    {
-      font_draw_char(x, y, *c++);
-      x += 8;
-    }
-
-    c = map[i/2].c[1];
-
-    if(x + strlen(c)*8 >= 256)
-    {
-      x = 0;
-      y+=8;
-    }
-
-    font_x[i + 1] = x;
-    font_y[i + 1] = y;
-
-    while(*c)
-    {
-      font_draw_char(x, y, *c++);
-      x += 8;
-    }
+    font->add_string(map[i/2].c[0], key_caps[i]);
+    font->add_string(map[i/2].c[1], key_caps[i+1]);
   }
+
+  for(i = 0; i < NUM_SCR_MODES; i++)
+  {
+    font->add_string(screen_mode_names[i], screen_mode_strs[i]);
+  }
+
+  for(i = 0; i < NUM_INP_MODES; i++)
+  {
+    font->add_string(input_mode_names[i], input_mode_strs[i]);
+  }
+
+  font->add_string("Current screen mode: ", static_strs[0]);
+  font->add_string("Current input mode: ", static_strs[1]);
 
   sf2d_texture_tile32(font_tex);
   shift = false;
   ctrl = false;
   alt = false;
-  win = false;
+
+  pan_x = 0;
+  pan_y = 0;
 }
 
 extern "C" void sf2d_texture_tile32_hardware(sf2d_texture *texture, const void *data, int w, int h);
@@ -186,184 +172,219 @@ void bx_3ds_gui_c::tile_screen()
   sf2d_texture_tile32_hardware(screen_tex, screen_fb, screen_tex->pow2_w, screen_tex->pow2_h);
 }
 
-// ::HANDLE_EVENTS()
-//
-// Called periodically (vga_update_interval in .bochsrc) so the
-// the gui code can poll for keyboard, mouse, and other
-// relevant events.
-
 void bx_3ds_gui_c::handle_events(void)
 {
   aptMainLoop();
   hidScanInput();
 
-  uint32_t a = hidKeysDown();
-  uint32_t b = hidKeysHeld();
+  uint32_t press = hidKeysDown();
+  uint32_t hold = hidKeysHeld();
 
-  if((a & KEY_TOUCH)) // run on touch
+  if(current_input_mode == INP_KEYBOARD)
   {
-    touchPosition p;
-    hidTouchRead(&p);
-
-    int i = 0;
-
-    for(; i < NUM_KEYS; i++)
+    if((press & KEY_TOUCH)) // run on touch
     {
-      if(p.px > map[i].x && p.px < (map[i].x + map[i].w) &&
-        p.py > map[i].y && p.py < (map[i].y + map[i].h))
+      touchPosition p;
+      hidTouchRead(&p);
+
+      int i = 0;
+
+      for(; i < NUM_KEYS; i++)
       {
-        if(map[i].flags & KEY_SHIFT)
+        if(p.px > map[i].x && p.px < (map[i].x + map[i].w) &&
+          p.py > map[i].y && p.py < (map[i].y + map[i].h))
         {
-          shift = !shift;
+          if(map[i].flags & KEY_SHIFT)
+          {
+            shift = !shift;
+          }
+          else if(map[i].flags & KEY_CTRL)
+          {
+            ctrl = !ctrl;
+          }
+          else if(map[i].flags & KEY_ALT)
+          {
+            alt = !alt;
+          }
+
+          else
+          {
+            key_state[i] = !key_state[i];
+            if(shift)
+            {
+              DEV_kbd_gen_scancode(BX_KEY_SHIFT_L);
+            }
+            if(ctrl)
+            {
+              DEV_kbd_gen_scancode(BX_KEY_CTRL_L);
+            }
+            if(alt)
+            {
+              DEV_kbd_gen_scancode(BX_KEY_ALT_L);
+            }
+
+            DEV_kbd_gen_scancode(map[i].code);
+          }
         }
-        else if(map[i].flags & KEY_CTRL)
+      }
+    }
+    else if(!(hold & KEY_TOUCH)) // not held? ie, released
+    {
+      int i = 0;
+      for(; i < NUM_KEYS; i++)
+      {
+        if(key_state[i] && !(map[i].flags & KEY_STICKY))
         {
-          ctrl = !ctrl;
-        }
-        else if(map[i].flags & KEY_ALT)
-        {
-          alt = !alt;
-        }
-        else if(map[i].flags & KEY_WIN)
-        {
-          win = !win;
-        }
-        else
-        {
-          key_state[i] = !key_state[i];
           if(shift)
           {
-            DEV_kbd_gen_scancode(BX_KEY_SHIFT_L);
+            DEV_kbd_gen_scancode(BX_KEY_SHIFT_L | BX_KEY_RELEASED);
+            shift = false;
           }
+
           if(ctrl)
           {
-            DEV_kbd_gen_scancode(BX_KEY_CTRL_L);
+            DEV_kbd_gen_scancode(BX_KEY_CTRL_L | BX_KEY_RELEASED);
+            ctrl = false;
           }
+
           if(alt)
           {
-            DEV_kbd_gen_scancode(BX_KEY_ALT_L);
-          }
-          if(win)
-          {
-            DEV_kbd_gen_scancode(BX_KEY_WIN_L);
+            DEV_kbd_gen_scancode(BX_KEY_ALT_L | BX_KEY_RELEASED);
+            alt = false;
           }
 
-          DEV_kbd_gen_scancode(map[i].code);
+          DEV_kbd_gen_scancode(map[i].code | BX_KEY_RELEASED);
+          key_state[i] = false;
         }
       }
     }
   }
-  else if(!(b & KEY_TOUCH)) // held?
+  else if(current_input_mode == INP_MOUSE)
   {
-    int i = 0;
-    for(; i < NUM_KEYS; i++)
+    // stub.
+  }
+
+  if(current_screen_mode == SCR_PAN && !guest_textmode)
+  {
+    u32 p = press | hold;
+
+    if((p & KEY_UP) && pan_y != 0)
     {
-      if(key_state[i] && !(map[i].flags & KEY_STICKY))
-      {
-        if(shift)
-        {
-          DEV_kbd_gen_scancode(BX_KEY_SHIFT_L | BX_KEY_RELEASED);
-          shift = false;
-        }
+      pan_y--;
+    }
+    if((p & KEY_DOWN) && pan_y < guest_yres - 240)
+    {
+      pan_y++;
+    }
 
-        if(ctrl)
-        {
-          DEV_kbd_gen_scancode(BX_KEY_CTRL_L | BX_KEY_RELEASED);
-          ctrl = false;
-        }
-
-        if(alt)
-        {
-          DEV_kbd_gen_scancode(BX_KEY_ALT_L | BX_KEY_RELEASED);
-          alt = false;
-        }
-
-        if(win)
-        {
-          DEV_kbd_gen_scancode(BX_KEY_WIN_L | BX_KEY_RELEASED);
-          win = false;
-        }
-
-        DEV_kbd_gen_scancode(map[i].code | BX_KEY_RELEASED);
-        key_state[i] = false;
-      }
+    if((p & KEY_LEFT) && pan_x != 0)
+    {
+      pan_x--;
+    }
+    if((p & KEY_RIGHT) && pan_x < guest_xres - 400)
+    {
+      pan_x++;
     }
   }
 
-  // do a thing.
+  if((press | hold) & KEY_SELECT) // select pressed/held?
+  {
+    if((press & KEY_L) && current_input_mode != 0)
+    {
+      current_input_mode--;
+    }
+
+    if((press & KEY_R) && current_input_mode != NUM_INP_MODES - 1)
+    {
+      current_input_mode++;
+    }
+  }
+  else
+  {
+    if((press & KEY_L) && current_screen_mode != 0)
+    {
+      current_screen_mode--;
+    }
+
+    if((press & KEY_R) && current_screen_mode != NUM_SCR_MODES - 1)
+    {
+      current_screen_mode++;
+    }
+  }
+
+  u32 keys = KEY_A | KEY_B | KEY_X | KEY_Y | KEY_L | KEY_R;
+
+  if((hold & keys) == keys)
+  {
+    SIM->quit_sim(0);
+  }
 }
-
-
-// ::FLUSH()
-//
-// Called periodically, requesting that the gui code flush all pending
-// screen update requests.
 
 void bx_3ds_gui_c::flush(void)
 {
   sf2d_start_frame(GFX_TOP, GFX_LEFT);
-  sf2d_draw_texture_scale(screen_tex, 0, 0, screen_xscale, screen_yscale);
+  if(current_screen_mode == SCR_SCALE)
+  {
+    sf2d_draw_texture_scale(screen_tex, 0, 0, screen_xscale, screen_yscale);
+  }
+  else if(current_screen_mode == SCR_PAN)
+  {
+    sf2d_draw_texture_part(screen_tex, 0, 0, pan_x, pan_y, 400, 240);
+  }
   sf2d_end_frame();
 
   sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
-  int i = 0;
-  for(; i < NUM_KEYS; i++)
-  {
-    bool active = key_state[i];
-    if(map[i].flags & KEY_SHIFT)
-    {
-      active = shift;
-    }
-    if(map[i].flags & KEY_CTRL)
-    {
-      active = ctrl;
-    }
-    if(map[i].flags & KEY_ALT)
-    {
-      active = alt;
-    }
-    if(map[i].flags & KEY_WIN)
-    {
-      active = win;
-    }
 
-    sf2d_draw_rectangle(map[i].x, map[i].y, map[i].w, map[i].h, active ? RGBA8(0xff, 0, 0, 0xff) : RGBA8(0xff, 0xff, 0xff, 0xff));
-    sf2d_draw_texture_part(font_tex, map[i].x + 2, map[i].y + 2, font_x[i*2 + (int)shift], font_y[i*2 + (int)shift], strlen(map[i].c[(int)shift])*8, 8);
+  if(current_input_mode == INP_KEYBOARD)
+  {
+    int i = 0;
+    for(; i < NUM_KEYS; i++)
+    {
+      bool active = key_state[i];
+      if(map[i].flags & KEY_SHIFT)
+      {
+        active = shift;
+      }
+      if(map[i].flags & KEY_CTRL)
+      {
+        active = ctrl;
+      }
+      if(map[i].flags & KEY_ALT)
+      {
+        active = alt;
+      }
+
+      FontStr s = key_caps[i*2 + (int)shift];
+      sf2d_draw_rectangle(map[i].x, map[i].y, map[i].w, map[i].h, active ? RGBA8(0xff, 0, 0, 0xff) : RGBA8(0xff, 0xff, 0xff, 0xff));
+      sf2d_draw_texture_part(font_tex, map[i].x + 2, map[i].y + 2, s.x, s.y, s.w, s.h);
+    }
   }
+  else if(current_input_mode == INP_MOUSE)
+  {
+
+  }
+
+  FontStr curr = static_strs[0];
+  sf2d_draw_texture_part(font_tex, 10, 200, curr.x, curr.y, curr.w, curr.h);
+
+  FontStr mode_str = screen_mode_strs[current_screen_mode];
+  sf2d_draw_texture_part(font_tex, 10 + curr.w, 200, mode_str.x, mode_str.y, mode_str.w, mode_str.h);
+
+  curr = static_strs[1];
+  sf2d_draw_texture_part(font_tex, 10, 208, curr.x, curr.y, curr.w, curr.h);
+
+  mode_str = input_mode_strs[current_input_mode];
+  sf2d_draw_texture_part(font_tex, 10 + curr.w, 208, mode_str.x, mode_str.y, mode_str.w, mode_str.h);
 
   sf2d_end_frame();
   sf2d_swapbuffers();
 }
 
-
-// ::CLEAR_SCREEN()
-//
-// Called to request that the VGA region is cleared.  Don't
-// clear the area that defines the headerbar.
-
 void bx_3ds_gui_c::clear_screen(void)
 {
-  // do some other things
+  memset(screen_fb, 0, screen_tex->pow2_w * screen_tex->pow2_h * 4);
+  tile_screen();
 }
-
-// ::TEXT_UPDATE()
-//
-// Called in a VGA text mode, to update the screen with
-// new content.
-//
-// old_text: array of character/attributes making up the contents
-//           of the screen from the last call.  See below
-// new_text: array of character/attributes making up the current
-//           contents, which should now be displayed.  See below
-//
-// format of old_text & new_text: each is tm_info->line_offset*text_rows
-//     bytes long. Each character consists of 2 bytes.  The first by is
-//     the character value, the second is the attribute byte.
-//
-// cursor_x: new x location of cursor
-// cursor_y: new y location of cursor
-// tm_info:  this structure contains information for additional
-//           features in text mode (cursor shape, line offset,...)
 
 void bx_3ds_gui_c::vga_draw_char(int x, int y, char c)
 {
@@ -388,48 +409,6 @@ void bx_3ds_gui_c::vga_draw_char(int x, int y, char c)
       else
       {
         dat[ind] = vga_bg;
-      }
-    }
-  }
-}
-
-void bx_3ds_gui_c::font_draw_char(int x, int y, char c)
-{
-  if(c > 128)
-  {
-    return;
-  }
-
-  uint32_t bytes_per_char = 8;
-  const uint8_t *letter = &font_8x8_data[c * bytes_per_char];
-  uint32_t xp,yp = 0;
-
-  Bit8u *dat = (Bit8u*)font_tex->data;
-
-  // This one isn't in z-order. apparently. cool.
-
-  for(yp=0 ; yp < 8; yp++)
-  {
-    for(xp=0; xp < 8; xp++)
-    {
-      uint32_t xx = x + xp;
-      uint32_t yy = y + yp;
-
-      if(letter[yp] & (1 << xp))
-      {
-        int ind = (xx + yy * font_tex->pow2_w) * 4;
-        dat[ind] = 0xff;
-        dat[ind+1] = 0xff;
-        dat[ind+2] = 0xff;
-        dat[ind+3] = 0xff;
-      }
-      else
-      {
-        int ind = (xx + yy * font_tex->pow2_w) * 4;
-        dat[ind] = 0;
-        dat[ind+1] = 0;
-        dat[ind+2] = 0xff;
-        dat[ind+3] = 0xff;
       }
     }
   }
@@ -527,23 +506,12 @@ void bx_3ds_gui_c::text_update(Bit8u *old_text, Bit8u *new_text,
 }
 
 
-
-// ::GET_CLIPBOARD_TEXT()
-//
-// Called to get text from the GUI clipboard. Returns 1 if successful.
-
 int bx_3ds_gui_c::get_clipboard_text(Bit8u **bytes, Bit32s *nbytes)
 {
   UNUSED(bytes);
   UNUSED(nbytes);
   return 0;
 }
-
-
-// ::SET_CLIPBOARD_TEXT()
-//
-// Called to copy the text screen contents to the GUI clipboard.
-// Returns 1 if successful.
 
 int bx_3ds_gui_c::set_clipboard_text(char *text_snapshot, Bit32u len)
 {
@@ -552,14 +520,6 @@ int bx_3ds_gui_c::set_clipboard_text(char *text_snapshot, Bit32u len)
   return 0;
 }
 
-
-// ::PALETTE_CHANGE()
-//
-// Allocate a color in the native GUI, for this color, and put
-// it in the colormap location 'index'.
-// returns: 0=no screen update needed (color map change has direct effect)
-//          1=screen updated needed (redraw using current colormap)
-
 bx_bool bx_3ds_gui_c::palette_change(Bit8u index, Bit8u red, Bit8u green, Bit8u blue)
 {
   // 0xRRGGBBAA
@@ -567,26 +527,10 @@ bx_bool bx_3ds_gui_c::palette_change(Bit8u index, Bit8u red, Bit8u green, Bit8u 
   return(0);
 }
 
-
-// ::GRAPHICS_TILE_UPDATE()
-//
-// Called to request that a tile of graphics be drawn to the
-// screen, since info in this region has changed.
-//
-// tile: array of 8bit values representing a block of pixels with
-//       dimension equal to the 'x_tilesize' & 'y_tilesize' members.
-//       Each value specifies an index into the
-//       array of colors you allocated for ::palette_change()
-// x0: x origin of tile
-// y0: y origin of tile
-//
-// note: origin of tile and of window based on (0,0) being in the upper
-//       left of the window.
-
 void bx_3ds_gui_c::graphics_tile_update(Bit8u *tile, unsigned x0, unsigned y0)
 {
-  int x = 0;
-  int y = 0;
+  u32 x = 0;
+  u32 y = 0;
   int i = 0;
   Bit32u *dat = (Bit32u*)screen_fb;
 
@@ -621,15 +565,21 @@ bx_svga_tileinfo_t * bx_3ds_gui_c::graphics_tile_info(bx_svga_tileinfo_t *info)
 
 Bit8u * bx_3ds_gui_c::graphics_tile_get(unsigned x, unsigned y, unsigned *w, unsigned *h)
 {
-  if (x + x_tilesize > screen_tex->width) {
+  if (x + x_tilesize > (u32)screen_tex->width) 
+  {
     *w = screen_tex->width - x;
-  } else {
+  }
+  else
+  {
     *w = x_tilesize;
   }
 
-  if (y + y_tilesize > screen_tex->height) {
+  if (y + y_tilesize > (u32)screen_tex->height)
+  {
     *h = screen_tex->height - y;
-  } else {
+  }
+  else
+  {
     *h = y_tilesize;
   }
 
@@ -647,19 +597,6 @@ void bx_3ds_gui_c::graphics_tile_update_in_place(unsigned x, unsigned y, unsigne
   // Just do nothing. It's fine. Really.
 }
 
-
-// ::DIMENSION_UPDATE()
-//
-// Called when the VGA mode changes it's X,Y dimensions.
-// Resize the window to this size, but you need to add on
-// the height of the headerbar to the Y value.
-//
-// x: new VGA x size
-// y: new VGA y size (add headerbar_y parameter from ::specific_init().
-// fheight: new VGA character height in text mode
-// fwidth : new VGA character width in text mode
-// bpp : bits per pixel in graphics mode
-
 void bx_3ds_gui_c::dimension_update(unsigned x, unsigned y, unsigned fheight, unsigned fwidth, unsigned bpp)
 {
   guest_textmode = (fheight > 0);
@@ -673,6 +610,8 @@ void bx_3ds_gui_c::dimension_update(unsigned x, unsigned y, unsigned fheight, un
     guest_ychars = y / fheight;
     screen_xscale = 1.0;
     screen_yscale = 1.0;
+    pan_x = 0;
+    pan_y = 0;
   }
   else
   {
@@ -685,22 +624,20 @@ void bx_3ds_gui_c::dimension_update(unsigned x, unsigned y, unsigned fheight, un
     tile_screen();
     screen_xscale = 400.0 / x;
     screen_yscale = 240.0 / y;
+
+    if(x <= 400)
+    {
+      pan_x = 0;
+    }
+    
+    if(y <= 240)
+    {
+      pan_y = 0;
+    }
   }
 
   BX_INFO(("mode switch to %i by %i at %i bpp, text mode: %i", x, y, bpp, (int)guest_textmode));
 }
-
-
-// ::CREATE_BITMAP()
-//
-// Create a monochrome bitmap of size 'xdim' by 'ydim', which will
-// be drawn in the headerbar.  Return an integer ID to the bitmap,
-// with which the bitmap can be referenced later.
-//
-// bmap: packed 8 pixels-per-byte bitmap.  The pixel order is:
-//       bit0 is the left most pixel, bit7 is the right most pixel.
-// xdim: x dimension of bitmap
-// ydim: y dimension of bitmap
 
 unsigned bx_3ds_gui_c::create_bitmap(const unsigned char *bmap, unsigned xdim, unsigned ydim)
 {
@@ -710,21 +647,6 @@ unsigned bx_3ds_gui_c::create_bitmap(const unsigned char *bmap, unsigned xdim, u
   return(0);
 }
 
-
-// ::HEADERBAR_BITMAP()
-//
-// Called to install a bitmap in the bochs headerbar (toolbar).
-//
-// bmap_id: will correspond to an ID returned from
-//     ::create_bitmap().  'alignment' is either BX_GRAVITY_LEFT
-//     or BX_GRAVITY_RIGHT, meaning install the bitmap in the next
-//     available leftmost or rightmost space.
-// alignment: is either BX_GRAVITY_LEFT or BX_GRAVITY_RIGHT,
-//     meaning install the bitmap in the next
-//     available leftmost or rightmost space.
-// f: a 'C' function pointer to callback when the mouse is clicked in
-//     the boundaries of this bitmap.
-
 unsigned bx_3ds_gui_c::headerbar_bitmap(unsigned bmap_id, unsigned alignment, void (*f)(void))
 {
   UNUSED(bmap_id);
@@ -733,29 +655,9 @@ unsigned bx_3ds_gui_c::headerbar_bitmap(unsigned bmap_id, unsigned alignment, vo
   return(0);
 }
 
-
-// ::SHOW_HEADERBAR()
-//
-// Show (redraw) the current headerbar, which is composed of
-// currently installed bitmaps.
-
 void bx_3ds_gui_c::show_headerbar(void)
 {
 }
-
-
-// ::REPLACE_BITMAP()
-//
-// Replace the bitmap installed in the headerbar ID slot 'hbar_id',
-// with the one specified by 'bmap_id'.  'bmap_id' will have
-// been generated by ::create_bitmap().  The old and new bitmap
-// must be of the same size.  This allows the bitmap the user
-// sees to change, when some action occurs.  For example when
-// the user presses on the floppy icon, it then displays
-// the ejected status.
-//
-// hbar_id: headerbar slot ID
-// bmap_id: bitmap ID
 
 void bx_3ds_gui_c::replace_bitmap(unsigned hbar_id, unsigned bmap_id)
 {
@@ -763,22 +665,10 @@ void bx_3ds_gui_c::replace_bitmap(unsigned hbar_id, unsigned bmap_id)
   UNUSED(bmap_id);
 }
 
-
-// ::EXIT()
-//
-// Called before bochs terminates, to allow for a graceful
-// exit from the native GUI mechanism.
-
 void bx_3ds_gui_c::exit(void)
 {
-  BX_INFO(("bx_3ds_gui_c::exit() not implemented yet."));
-  svcExitProcess();
+  ::exit(0);
 }
-
-
-// ::MOUSE_ENABLED_CHANGED_SPECIFIC()
-//
-// Called whenever the mouse capture mode should be changed.
 
 void bx_3ds_gui_c::mouse_enabled_changed_specific(bx_bool val)
 {

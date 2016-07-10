@@ -442,7 +442,7 @@ void bx_real_sim_c::quit_sim(int code)
     ::exit(exit_code);
   }
 #else
-  svcExitProcess();
+  exit(0);
 #endif
 }
 
