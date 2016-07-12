@@ -84,7 +84,7 @@ public:
 
   FontStr screen_mode_strs[NUM_SCR_MODES];
   FontStr input_mode_strs[NUM_INP_MODES];
-  FontStr static_strs[2];
+  FontStr static_strs[4];
 
   bool key_state[NUM_KEYS];
   bool shift;
@@ -100,6 +100,14 @@ public:
 
   u32 pan_x;
   u32 pan_y;
+
+  u32 mouse_last_x;
+  u32 mouse_last_y;
+
+  bool mouse_state;
+
+  double mouse_sens;
+  u32 button_state;
 };
 
 // declare one instance of the gui object and call macro to insert the
@@ -155,11 +163,17 @@ void bx_3ds_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
 
   font->add_string("Current screen mode: ", static_strs[0]);
   font->add_string("Current input mode: ", static_strs[1]);
+  font->add_string("Mouse disabled", static_strs[2]);
+  font->add_string("Mouse enabled", static_strs[3]);
 
   sf2d_texture_tile32(font_tex);
   shift = false;
   ctrl = false;
   alt = false;
+
+  mouse_state = false;
+  mouse_sens = 2.0;
+  button_state = 0;
 
   pan_x = 0;
   pan_y = 0;
@@ -170,6 +184,12 @@ void bx_3ds_gui_c::tile_screen()
 {
   screen_tex->tiled = false;
   sf2d_texture_tile32_hardware(screen_tex, screen_fb, screen_tex->pow2_w, screen_tex->pow2_h);
+}
+
+bool aabb(int xp, int yp, int x, int y, int w, int h)
+{
+  return xp >= x && xp <= x + w &&
+         yp >= y && yp <= y + h;
 }
 
 void bx_3ds_gui_c::handle_events(void)
@@ -261,7 +281,52 @@ void bx_3ds_gui_c::handle_events(void)
   }
   else if(current_input_mode == INP_MOUSE)
   {
-    // stub.
+    // int delta_x, int delta_y, int delta_z, unsigned button_state, bx_bool absxy)
+
+    u32 old_buttons = button_state;
+
+    touchPosition pos;
+    hidTouchRead(&pos);
+
+    u32 p = press | hold;
+    if((p & KEY_TOUCH))
+    {
+      if(aabb(pos.px, pos.py, 10, 10, 220, 140))
+      {
+        if(mouse_last_x != 0 && mouse_last_y != 0)
+        {
+          s32 dx = pos.px - mouse_last_x;
+          s32 dy = pos.py - mouse_last_y;
+          if(dx != 0 || dy != 0)
+          {
+            DEV_mouse_motion(dx * mouse_sens, -dy * mouse_sens, 0, button_state, 0);
+          }
+        }
+
+        mouse_last_x = pos.px;
+        mouse_last_y = pos.py;
+      }
+      else if(aabb(pos.px, pos.py, 10, 150, 150, 20))
+      {
+        button_state |= 1;
+        mouse_last_x = mouse_last_y = 0;
+      }
+      else if(aabb(pos.px, pos.py, 160, 150, 150, 20))
+      {
+        button_state |= (1 << 1);
+        mouse_last_x = mouse_last_y = 0;
+      }
+    }
+    else
+    {
+      button_state = 0;
+      mouse_last_x = mouse_last_y = 0;
+    }
+
+    if(button_state != old_buttons)
+    {
+      DEV_mouse_motion(0, 0, 0, button_state, 0);
+    }
   }
 
   if(current_screen_mode == SCR_PAN && !guest_textmode)
@@ -297,6 +362,16 @@ void bx_3ds_gui_c::handle_events(void)
     if((press & KEY_R) && current_input_mode != NUM_INP_MODES - 1)
     {
       current_input_mode++;
+    }
+
+    if(mouse_state && current_input_mode != INP_MOUSE)
+    {
+      toggle_mouse_enable();
+    }
+
+    if(!mouse_state && current_input_mode == INP_MOUSE)
+    {
+      toggle_mouse_enable();
     }
   }
   else
@@ -361,7 +436,9 @@ void bx_3ds_gui_c::flush(void)
   }
   else if(current_input_mode == INP_MOUSE)
   {
-
+    sf2d_draw_rectangle(10, 10, 300, 140, RGBA8(0xff, 0xff, 0xff, 0xff));
+    sf2d_draw_rectangle(10, 150, 150, 20, ((button_state & 1) != 0) ? RGBA8(0, 0, 0xff, 0xff) : RGBA8(0xff, 0, 0, 0xff));
+    sf2d_draw_rectangle(160, 150, 150, 20, ((button_state & (1<<1)) != 0) ? RGBA8(0, 0, 0xff, 0xff) : RGBA8(0, 0xff, 0, 0xff));
   }
 
   FontStr curr = static_strs[0];
@@ -375,6 +452,9 @@ void bx_3ds_gui_c::flush(void)
 
   mode_str = input_mode_strs[current_input_mode];
   sf2d_draw_texture_part(font_tex, 10 + curr.w, 208, mode_str.x, mode_str.y, mode_str.w, mode_str.h);
+
+  FontStr mouse_str = static_strs[2 + (int)mouse_state];
+  sf2d_draw_texture_part(font_tex, 10, 216, mouse_str.x, mouse_str.y, mouse_str.w, mouse_str.h);
 
   sf2d_end_frame();
   sf2d_swapbuffers();
@@ -672,6 +752,7 @@ void bx_3ds_gui_c::exit(void)
 
 void bx_3ds_gui_c::mouse_enabled_changed_specific(bx_bool val)
 {
+  mouse_state = (bool)val;
 }
 
 #endif /* if BX_WITH_3ds */

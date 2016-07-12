@@ -392,7 +392,6 @@ BX_CPU_C::system_read_qword(bx_address laddr)
       return data;
     }
   }
-BX_INFO(("actual read qword"));
   if (access_read_linear(laddr, 8, 0, BX_READ, 0x0, (void *) &data) < 0)
     exception(BX_GP_EXCEPTION, 0);
 
