@@ -57,6 +57,7 @@ extern "C" {
 
 #if BX_WITH_3DS
 #include <3ds.h>
+#include <stdlib.h>
 #endif
 
 #define CI_PATH_LENGTH 512
@@ -140,7 +141,7 @@ int ask_uint(const char *prompt, const char *help, Bit32u min, Bit32u max, Bit32
   printf(prompt, the_default);
   unsigned int   i = the_default;
   printf("%i", the_default);
-  while(1)
+  while(aptMainLoop())
   {
     hidScanInput();
     int k = hidKeysDown();
@@ -168,6 +169,9 @@ int ask_uint(const char *prompt, const char *help, Bit32u min, Bit32u max, Bit32
       return 0;
     }
   }
+
+  // APT wants us to die.
+  exit(0);
 #endif
 }
 
@@ -209,7 +213,7 @@ int ask_int(const char *prompt, const char *help, Bit32s min, Bit32s max, Bit32s
   printf(prompt, the_default);
   int   i = the_default;
   printf("%i", the_default);
-  while(1)
+  while(aptMainLoop())
   {
     hidScanInput();
     int k = hidKeysDown();
@@ -237,6 +241,9 @@ int ask_int(const char *prompt, const char *help, Bit32s min, Bit32s max, Bit32s
       return 0;
     }
   }
+
+  // APT wants us to die.
+  exit(0);
 #endif
 }
 
@@ -280,35 +287,37 @@ int ask_menu(const char *prompt, const char *help, int n_choices, const char *ch
 #else
     printf(prompt, the_default);
     int i = the_default;
-      printf("%i", the_default);
-      while(1)
+    printf("%i", the_default);
+    while(aptMainLoop())
+    {
+      hidScanInput();
+      int k = hidKeysDown();
+      if(k & KEY_UP)
       {
-        hidScanInput();
-        int k = hidKeysDown();
-        if(k & KEY_UP)
+        if(i > 1)
         {
-          if(i > 1)
-          {
-            i--;
-            printf("\b%i", i);
-          }
-        }
-
-        if(k & KEY_DOWN)
-        {
-          if(i < n_choices)
-          {
-            i++;
-            printf("\b%i", i);
-          }
-        }
-
-        if(k & KEY_A)
-        {
-          *out = i;
-          return 0;
+          i--;
+          printf("\b%i", i);
         }
       }
+
+      if(k & KEY_DOWN)
+      {
+        if(i < n_choices)
+        {
+          i++;
+          printf("\b%i", i);
+        }
+      }
+
+      if(k & KEY_A)
+      {
+        *out = i;
+        return 0;
+      }
+    }
+    // APT wants us to die.
+    exit(0);
 #endif
 }
 

@@ -119,6 +119,8 @@ IMPLEMENT_GUI_PLUGIN_CODE(3ds)
 
 void bx_3ds_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
 {
+  //APT_SetAppCpuTimeLimit(80);
+
   BX_INFO(("bx_3ds_gui_c::specific_init"));
 
   UNUSED(argc);
@@ -194,7 +196,10 @@ bool aabb(int xp, int yp, int x, int y, int w, int h)
 
 void bx_3ds_gui_c::handle_events(void)
 {
-  aptMainLoop();
+  if(!aptMainLoop())
+  {
+    BX_PANIC(("APT wants us dead."));
+  }
   hidScanInput();
 
   uint32_t press = hidKeysDown();

@@ -1,0 +1,3 @@
+[submodule "3ds/buildtools"]
+	path = 3ds/buildtools
+	url = https://github.com/Steveice10/buildtools.git
