@@ -1037,6 +1037,28 @@ bx_bool load_and_init_display_lib(void)
   return true;
 }
 
+#if BX_WITH_3DS && BX_SHOW_IPS
+bool bx_3ds_signal = false;
+bool bx_3ds_signal_run = true;
+
+void sig_handler_thread_func(void *_)
+{
+  BX_INFO(("sig handler thread running"));
+
+  /*Handle timerHandle = 0;
+  Result r = svcCreateTimer(&timerHandle, 2);
+  BX_INFO(("timer handle %08x res %08x", timerHandle, r));
+  svcSetTimer(timerHandle, 0, 1000000000ULL);*/
+
+  while(bx_3ds_signal_run)
+  {
+      //svcWaitSynchronization(timerHandle, -1);
+      svcSleepThread(1000000000ULL);
+      bx_3ds_signal = true;
+  }
+}
+#endif
+
 int bx_begin_simulation (int argc, char *argv[])
 {
   bx_user_quit = 0;
@@ -1073,6 +1095,10 @@ int bx_begin_simulation (int argc, char *argv[])
     BX_PANIC(("cpu: too many SMP threads defined, only %u threads supported by %sAPIC",
       max_smp_threads, simulate_xapic ? "x" : "legacy "));
   }
+#endif
+
+#if BX_WITH_3DS && BX_SHOW_IPS
+	Thread sig_handler_thread = threadCreate(sig_handler_thread_func, nullptr, 0x2000, 0x20, 2, true);
 #endif
 
   BX_ASSERT(bx_cpu_count > 0);
@@ -1161,6 +1187,8 @@ int bx_begin_simulation (int argc, char *argv[])
   }
 #endif /* BX_DEBUGGER == 0 */
   BX_INFO(("cpu loop quit, shutting down simulator"));
+  bx_3ds_signal_run = false;
+  threadJoin(sig_handler_thread, U64_MAX);
   bx_atexit();
   return(0);
 }
@@ -1444,7 +1472,7 @@ void bx_init_hardware()
   signal(SIGINT, bx_signal_handler);
 #endif
 
-#if BX_SHOW_IPS
+#if BX_SHOW_IPS && !BX_WITH_3DS
 #if !defined(WIN32)
   if (!SIM->is_wx_selected()) {
     signal(SIGALRM, bx_signal_handler);
@@ -1490,7 +1518,7 @@ int bx_atexit(void)
   signal(SIGINT, SIG_DFL);
 #endif
 
-#if BX_SHOW_IPS
+#if BX_SHOW_IPS && !BX_WITH_3DS
 #if !defined(__MINGW32__) && !defined(_MSC_VER)
   if (!SIM->is_wx_selected()) {
     alarm(0);
@@ -1550,7 +1578,7 @@ void CDECL bx_signal_handler(int signum)
   }
 #endif
 
-#if BX_SHOW_IPS
+#if BX_SHOW_IPS && !BX_WITH_3DS
   if (signum == SIGALRM) {
     bx_show_ips_handler();
 #if !defined(WIN32)

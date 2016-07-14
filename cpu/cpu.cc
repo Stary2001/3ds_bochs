@@ -26,6 +26,11 @@
 
 #include "cpustats.h"
 
+#if BX_WITH_3DS && BX_SHOW_IPS
+extern bool bx_3ds_signal;
+void bx_show_ips_handler(void);
+#endif
+
 void BX_CPU_C::cpu_loop(void)
 {
 #if BX_DEBUGGER
@@ -87,6 +92,14 @@ void BX_CPU_C::cpu_loop(void)
       if (BX_CPU_THIS_PTR async_event) break;
 
       i = getICacheEntry()->i;
+
+      #if BX_WITH_3DS && BX_SHOW_IPS
+        if (bx_3ds_signal)
+        {
+          bx_3ds_signal = false;
+          bx_show_ips_handler();
+        }
+      #endif
     }
 #else // BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS == 0
 
@@ -122,6 +135,14 @@ void BX_CPU_C::cpu_loop(void)
         last = i + (entry->tlen);
       }
     }
+
+#if BX_WITH_3DS && BX_SHOW_IPS
+  if (bx_3ds_signal)
+  {
+    bx_3ds_signal = false;
+    bx_show_ips_handler();
+  }
+#endif
 #endif
 
     // clear stop trace magic indication that probably was set by repeat or branch32/64

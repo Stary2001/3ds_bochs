@@ -67,6 +67,9 @@ public:
   void vga_draw_char(int x, int y, char c);
   void font_draw_char(int x, int y, char c);
   void tile_screen();
+  #if BX_SHOW_IPS
+    virtual void show_ips(Bit32u ips_count);
+  #endif
 
   unsigned int guest_xchars;
   unsigned int guest_ychars;
@@ -84,7 +87,7 @@ public:
 
   FontStr screen_mode_strs[NUM_SCR_MODES];
   FontStr input_mode_strs[NUM_INP_MODES];
-  FontStr static_strs[4];
+  FontStr static_strs[6];
 
   bool key_state[NUM_KEYS];
   bool shift;
@@ -108,6 +111,9 @@ public:
 
   double mouse_sens;
   u32 button_state;
+
+  bool ips_update;
+  char *ips_text;
 };
 
 // declare one instance of the gui object and call macro to insert the
@@ -167,6 +173,8 @@ void bx_3ds_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
   font->add_string("Current input mode: ", static_strs[1]);
   font->add_string("Mouse disabled", static_strs[2]);
   font->add_string("Mouse enabled", static_strs[3]);
+  font->add_string(".0123456789M", static_strs[4]);
+  font->add_string("IPS: ", static_strs[5]);
 
   sf2d_texture_tile32(font_tex);
   shift = false;
@@ -179,6 +187,9 @@ void bx_3ds_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
 
   pan_x = 0;
   pan_y = 0;
+
+  ips_text = (char*)malloc(16);
+  sprintf(ips_text, "%u.%3.3u", 99, 9999);
 }
 
 extern "C" void sf2d_texture_tile32_hardware(sf2d_texture *texture, const void *data, int w, int h);
@@ -461,6 +472,30 @@ void bx_3ds_gui_c::flush(void)
   FontStr mouse_str = static_strs[2 + (int)mouse_state];
   sf2d_draw_texture_part(font_tex, 10, 216, mouse_str.x, mouse_str.y, mouse_str.w, mouse_str.h);
 
+  FontStr ips_str = static_strs[5];
+  sf2d_draw_texture_part(font_tex, 10, 224, ips_str.x, ips_str.y, ips_str.w, ips_str.h);
+
+  FontStr nums_str = static_strs[4];
+  int s_i = 0;
+  int s_off = 0;
+  int x = 10 + ips_str.w;
+
+  for(; s_i < strlen(ips_text); s_i++)
+  {
+    char c = ips_text[s_i];
+    if(c == '.')
+    {
+      s_off = 0;
+    }
+    else
+    {
+      s_off = ((ips_text[s_i] - '0') + 1) * 8;
+    }
+    sf2d_draw_texture_part(font_tex, x, 224, nums_str.x + s_off, nums_str.y, 8, 8);
+    x += 8;
+  }
+  sf2d_draw_texture_part(font_tex, x, 224, nums_str.x + 88, nums_str.y, 8, 8);
+
   sf2d_end_frame();
   sf2d_swapbuffers();
 }
@@ -668,7 +703,7 @@ Bit8u * bx_3ds_gui_c::graphics_tile_get(unsigned x, unsigned y, unsigned *w, uns
     *h = y_tilesize;
   }
 
-  Bit8u *dat = (Bit8u*)screen_tex->data;
+  Bit8u *dat = (Bit8u*) screen_fb;
   return dat + (y * screen_tex->pow2_w * 4 + (x * 4));
 }
 
@@ -759,5 +794,13 @@ void bx_3ds_gui_c::mouse_enabled_changed_specific(bx_bool val)
 {
   mouse_state = (bool)val;
 }
+
+#if BX_SHOW_IPS
+void bx_3ds_gui_c::show_ips(Bit32u ips_count)
+{
+  ips_count /= 1000;
+  sprintf(ips_text, "%u.%3.3u", ips_count / 1000, ips_count % 1000);
+}
+#endif
 
 #endif /* if BX_WITH_3ds */
