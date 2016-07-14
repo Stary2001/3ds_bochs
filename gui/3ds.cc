@@ -30,7 +30,6 @@
 #include "icon_bochs.h"
 
 #include <3ds.h>
-#include <sf2d.h>
 #include "3ds_5x8_font.h"
 #include "3ds_8x8_font.h"
 #include "3ds_keymap.h"
@@ -64,9 +63,13 @@ public:
   DECLARE_GUI_VIRTUAL_METHODS()
   DECLARE_GUI_NEW_VIRTUAL_METHODS()
 
+  void draw_mouse();
+  void draw_keyboard();
+  void draw_key(int k);
+  void draw_rectangle(int x, int y, int w, int h, u32 colour);
+
   void vga_draw_char(int x, int y, char c);
   void font_draw_char(int x, int y, char c);
-  void tile_screen();
   #if BX_SHOW_IPS
     virtual void show_ips(Bit32u ips_count);
   #endif
@@ -75,19 +78,18 @@ public:
   unsigned int guest_ychars;
 
   void *screen_fb;
-  sf2d_texture *screen_tex;
-  double screen_xscale;
-  double screen_yscale;
+  u8 *top_fb;
+  u16 top_w;
+  u16 top_h;
 
+  u8 *bottom_fb;
+  u16 bottom_w;
+  u16 bottom_h;
+
+  const char *static_strs[5];
   Font *font;
-  sf2d_texture *font_tex;
-  FontStr key_caps[NUM_KEYS * 2];
   int current_screen_mode;
   int current_input_mode;
-
-  FontStr screen_mode_strs[NUM_SCR_MODES];
-  FontStr input_mode_strs[NUM_INP_MODES];
-  FontStr static_strs[6];
 
   bool key_state[NUM_KEYS];
   bool shift;
@@ -98,8 +100,6 @@ public:
   u32 vga_bg;
 
   u32 palette[256];
-
-  sf2d_texture *bar_bitmaps[NUM_BITMAPS];
 
   u32 pan_x;
   u32 pan_y;
@@ -114,6 +114,9 @@ public:
 
   bool ips_update;
   char *ips_text;
+
+  double screen_xscale;
+  double screen_yscale;
 };
 
 // declare one instance of the gui object and call macro to insert the
@@ -129,6 +132,14 @@ void bx_3ds_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
 
   BX_INFO(("bx_3ds_gui_c::specific_init"));
 
+  gfxSetScreenFormat(GFX_TOP, GSP_RGBA8_OES);
+  gfxSetScreenFormat(GFX_BOTTOM, GSP_RGBA8_OES);
+  gfxSetDoubleBuffering(GFX_TOP, false);
+  gfxSetDoubleBuffering(GFX_BOTTOM, false);
+
+  gfxSwapBuffersGpu();
+  gspWaitForVBlank();
+
   UNUSED(argc);
   UNUSED(argv);
   UNUSED(headerbar_y);
@@ -139,44 +150,31 @@ void bx_3ds_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
     BX_INFO(("private_colormap option ignored."));
   }
 
-  sf2d_init();
-  screen_tex = sf2d_create_texture(400, 240, TEXFMT_RGBA8, SF2D_PLACE_RAM);
-  screen_fb = linearAlloc(screen_tex->pow2_w * screen_tex->pow2_h * 4);
-  memset(screen_fb, 0, screen_tex->pow2_w * screen_tex->pow2_h * 4);
-  tile_screen();
+  top_fb = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, &top_w, &top_h);
+  bottom_fb = gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, &bottom_w, &bottom_h);
+
+  BX_INFO(("top: %ix%i ", top_w, top_h));
+  BX_INFO(("bottom: %ix%i ", bottom_w, bottom_h));
+
+  memset(top_fb, 0, top_w * top_h * 4);
+  memset(bottom_fb, 0, bottom_w * bottom_h * 4);
+
+  screen_fb = malloc(400 * 240 * 4);
+  memset(screen_fb, 0, 400 * 240 * 4);
 
   screen_xscale = 1;
   screen_yscale = 1;
 
   int i;
 
-  font_tex = sf2d_create_texture(256, 256, TEXFMT_RGBA8, SF2D_PLACE_RAM);
-  font = new Font(font_tex, font_8x8_data);
+  font = new Font(bottom_fb, bottom_w, bottom_h, font_8x8_data);
 
-  for(i = 0; i < NUM_KEYS*2; i+=2)
-  {
-    font->add_string(map[i/2].c[0], key_caps[i]);
-    font->add_string(map[i/2].c[1], key_caps[i+1]);
-  }
+  static_strs[0] = "Current screen mode: ";
+  static_strs[1] = "Current input mode: ";
+  static_strs[2] = "Mouse disabled";
+  static_strs[3] = "Mouse enabled";
+  static_strs[4] = "IPS: ";
 
-  for(i = 0; i < NUM_SCR_MODES; i++)
-  {
-    font->add_string(screen_mode_names[i], screen_mode_strs[i]);
-  }
-
-  for(i = 0; i < NUM_INP_MODES; i++)
-  {
-    font->add_string(input_mode_names[i], input_mode_strs[i]);
-  }
-
-  font->add_string("Current screen mode: ", static_strs[0]);
-  font->add_string("Current input mode: ", static_strs[1]);
-  font->add_string("Mouse disabled", static_strs[2]);
-  font->add_string("Mouse enabled", static_strs[3]);
-  font->add_string(".0123456789M", static_strs[4]);
-  font->add_string("IPS: ", static_strs[5]);
-
-  sf2d_texture_tile32(font_tex);
   shift = false;
   ctrl = false;
   alt = false;
@@ -190,13 +188,9 @@ void bx_3ds_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
 
   ips_text = (char*)malloc(16);
   sprintf(ips_text, "%u.%3.3u", 99, 9999);
-}
+  ips_update = false;
 
-extern "C" void sf2d_texture_tile32_hardware(sf2d_texture *texture, const void *data, int w, int h);
-void bx_3ds_gui_c::tile_screen()
-{
-  screen_tex->tiled = false;
-  sf2d_texture_tile32_hardware(screen_tex, screen_fb, screen_tex->pow2_w, screen_tex->pow2_h);
+  draw_keyboard();
 }
 
 bool aabb(int xp, int yp, int x, int y, int w, int h)
@@ -233,6 +227,7 @@ void bx_3ds_gui_c::handle_events(void)
           if(map[i].flags & KEY_SHIFT)
           {
             shift = !shift;
+            draw_keyboard();
           }
           else if(map[i].flags & KEY_CTRL)
           {
@@ -242,7 +237,6 @@ void bx_3ds_gui_c::handle_events(void)
           {
             alt = !alt;
           }
-
           else
           {
             key_state[i] = !key_state[i];
@@ -261,6 +255,7 @@ void bx_3ds_gui_c::handle_events(void)
 
             DEV_kbd_gen_scancode(map[i].code);
           }
+          draw_key(i);
         }
       }
     }
@@ -275,6 +270,7 @@ void bx_3ds_gui_c::handle_events(void)
           {
             DEV_kbd_gen_scancode(BX_KEY_SHIFT_L | BX_KEY_RELEASED);
             shift = false;
+            draw_keyboard();
           }
 
           if(ctrl)
@@ -291,6 +287,8 @@ void bx_3ds_gui_c::handle_events(void)
 
           DEV_kbd_gen_scancode(map[i].code | BX_KEY_RELEASED);
           key_state[i] = false;
+
+          draw_key(i);
         }
       }
     }
@@ -389,6 +387,16 @@ void bx_3ds_gui_c::handle_events(void)
     {
       toggle_mouse_enable();
     }
+
+    memset(bottom_fb, 0, bottom_w * bottom_h * 4); // clear bottom screen..
+    if(current_input_mode == INP_KEYBOARD)
+    {
+      draw_keyboard();
+    }
+    else if(current_input_mode == INP_MOUSE)
+    {
+      draw_mouse();
+    }
   }
   else
   {
@@ -401,6 +409,7 @@ void bx_3ds_gui_c::handle_events(void)
     {
       current_screen_mode++;
     }
+    //clear_screen();
   }
 
   u32 keys = KEY_A | KEY_B | KEY_X | KEY_Y | KEY_L | KEY_R;
@@ -411,9 +420,59 @@ void bx_3ds_gui_c::handle_events(void)
   }
 }
 
+void bx_3ds_gui_c::draw_rectangle(int x, int y, int w, int h, u32 colour)
+{
+  int xx, yy;
+  u32 *dat = (u32*)bottom_fb;
+
+  for(yy = y; yy < y + h ; yy++)
+  {
+    for(xx = x; xx < x + w; xx++)
+    {
+      int ind = xx * bottom_w + (bottom_w - yy);
+      dat[ind] = colour;
+    }
+  }
+}
+
+void bx_3ds_gui_c::draw_key(int k)
+{
+  bool active = key_state[k];
+  if(map[k].flags & KEY_SHIFT)
+  {
+    active = shift;
+  }
+  if(map[k].flags & KEY_CTRL)
+  {
+    active = ctrl;
+  }
+  if(map[k].flags & KEY_ALT)
+  {
+    active = alt;
+  }
+  draw_rectangle(map[k].x, map[k].y, map[k].w, map[k].h, active ? 0xff0000ff : 0xffffffff);
+  font->draw_string(map[k].x + 2, map[k].y + 2, map[k].c[(int)shift]);
+}
+
+void bx_3ds_gui_c::draw_keyboard()
+{
+  int i = 0;
+  for(; i < NUM_KEYS; i++)
+  {
+    draw_key(i);
+  }
+}
+
+void bx_3ds_gui_c::draw_mouse()
+{
+  draw_rectangle(10, 10, 300, 140, 0xffffffff);
+  draw_rectangle(10, 150, 150, 20, ((button_state & 1) != 0) ? 0xffff0000 : 0xff00ff00);
+  draw_rectangle(160, 150, 150, 20, ((button_state & (1<<1)) != 0) ? 0xff0000ff : 0xff00ff00);
+}
+
 void bx_3ds_gui_c::flush(void)
 {
-  sf2d_start_frame(GFX_TOP, GFX_LEFT);
+  /*sf2d_start_frame(GFX_TOP, GFX_LEFT);
   if(current_screen_mode == SCR_SCALE)
   {
     sf2d_draw_texture_scale(screen_tex, 0, 0, screen_xscale, screen_yscale);
@@ -424,38 +483,6 @@ void bx_3ds_gui_c::flush(void)
   }
   sf2d_end_frame();
 
-  sf2d_start_frame(GFX_BOTTOM, GFX_LEFT);
-
-  if(current_input_mode == INP_KEYBOARD)
-  {
-    int i = 0;
-    for(; i < NUM_KEYS; i++)
-    {
-      bool active = key_state[i];
-      if(map[i].flags & KEY_SHIFT)
-      {
-        active = shift;
-      }
-      if(map[i].flags & KEY_CTRL)
-      {
-        active = ctrl;
-      }
-      if(map[i].flags & KEY_ALT)
-      {
-        active = alt;
-      }
-
-      FontStr s = key_caps[i*2 + (int)shift];
-      sf2d_draw_rectangle(map[i].x, map[i].y, map[i].w, map[i].h, active ? RGBA8(0xff, 0, 0, 0xff) : RGBA8(0xff, 0xff, 0xff, 0xff));
-      sf2d_draw_texture_part(font_tex, map[i].x + 2, map[i].y + 2, s.x, s.y, s.w, s.h);
-    }
-  }
-  else if(current_input_mode == INP_MOUSE)
-  {
-    sf2d_draw_rectangle(10, 10, 300, 140, RGBA8(0xff, 0xff, 0xff, 0xff));
-    sf2d_draw_rectangle(10, 150, 150, 20, ((button_state & 1) != 0) ? RGBA8(0, 0, 0xff, 0xff) : RGBA8(0xff, 0, 0, 0xff));
-    sf2d_draw_rectangle(160, 150, 150, 20, ((button_state & (1<<1)) != 0) ? RGBA8(0, 0, 0xff, 0xff) : RGBA8(0, 0xff, 0, 0xff));
-  }
 
   FontStr curr = static_strs[0];
   sf2d_draw_texture_part(font_tex, 10, 200, curr.x, curr.y, curr.w, curr.h);
@@ -480,30 +507,15 @@ void bx_3ds_gui_c::flush(void)
   int s_off = 0;
   int x = 10 + ips_str.w;
 
-  for(; s_i < strlen(ips_text); s_i++)
-  {
-    char c = ips_text[s_i];
-    if(c == '.')
-    {
-      s_off = 0;
-    }
-    else
-    {
-      s_off = ((ips_text[s_i] - '0') + 1) * 8;
-    }
-    sf2d_draw_texture_part(font_tex, x, 224, nums_str.x + s_off, nums_str.y, 8, 8);
-    x += 8;
-  }
-  sf2d_draw_texture_part(font_tex, x, 224, nums_str.x + 88, nums_str.y, 8, 8);
+  // draw ips_str
 
   sf2d_end_frame();
-  sf2d_swapbuffers();
+  sf2d_swapbuffers();*/
 }
 
 void bx_3ds_gui_c::clear_screen(void)
 {
-  memset(screen_fb, 0, screen_tex->pow2_w * screen_tex->pow2_h * 4);
-  tile_screen();
+  memset(top_fb, 0, top_w * top_h * 4);
 }
 
 void bx_3ds_gui_c::vga_draw_char(int x, int y, char c)
@@ -512,7 +524,7 @@ void bx_3ds_gui_c::vga_draw_char(int x, int y, char c)
   const uint8_t *letter = &font_5x8_data[c * bytes_per_char];
   uint32_t xp,yp = 0;
 
-  Bit32u *dat = (Bit32u*)screen_fb;
+  Bit32u *dat = (Bit32u*)top_fb;
 
   for(yp=0 ; yp < 8; yp++)
   {
@@ -521,7 +533,7 @@ void bx_3ds_gui_c::vga_draw_char(int x, int y, char c)
       uint32_t xx = (x*5) + xp;
       uint32_t yy = (y * 8) + yp;
 
-      int ind = xx + yy * screen_tex->pow2_w;
+      int ind = xx * top_w + (top_w - yy);
       if(letter[yp + ((xp / 5) * bytes_per_char)] & (1 << (7 - xp)))
       {
         dat[ind] = vga_fg;
@@ -540,8 +552,8 @@ void bx_3ds_gui_c::text_update(Bit8u *old_text, Bit8u *new_text,
         unsigned long cursor_x, unsigned long cursor_y,
         bx_vga_tminfo_t *tm_info)
 {
-  // 0xRRGGBBAA is used for texture writes
 
+  // rgb565
   const u32 vga_colours[] =
   {
     0x000000ff, // black #000000
@@ -621,8 +633,6 @@ void bx_3ds_gui_c::text_update(Bit8u *old_text, Bit8u *new_text,
   } else {
     //curs_set(0);
   }
-
-  tile_screen();
 }
 
 
@@ -652,24 +662,23 @@ void bx_3ds_gui_c::graphics_tile_update(Bit8u *tile, unsigned x0, unsigned y0)
   u32 x = 0;
   u32 y = 0;
   int i = 0;
-  Bit32u *dat = (Bit32u*)screen_fb;
+  Bit32u *dat = (Bit32u*)top_fb;
 
   for(; y < y_tilesize; y++)
   {
     for(x = 0; x < x_tilesize; x++)
     {
-      int ind = (x0 + x) + ((y0+y) * screen_tex->pow2_w);
+      int ind = (x0 + x) * top_w + (top_w - (y0 + y));
       dat[ind] = palette[tile[i]];
       i++;
     }
   }
-  tile_screen();
 }
 
 bx_svga_tileinfo_t * bx_3ds_gui_c::graphics_tile_info(bx_svga_tileinfo_t *info)
 {
   info->bpp = 32;
-  info->pitch = screen_tex->pow2_w * 4;
+  info->pitch = 240 * 4;
   info->red_shift = 24;
   info->green_shift = 16;
   info->blue_shift = 8;
@@ -685,18 +694,18 @@ bx_svga_tileinfo_t * bx_3ds_gui_c::graphics_tile_info(bx_svga_tileinfo_t *info)
 
 Bit8u * bx_3ds_gui_c::graphics_tile_get(unsigned x, unsigned y, unsigned *w, unsigned *h)
 {
-  if (x + x_tilesize > (u32)screen_tex->width) 
+  if (x + x_tilesize > guest_xres)
   {
-    *w = screen_tex->width - x;
+    *w = guest_xres - x;
   }
   else
   {
     *w = x_tilesize;
   }
 
-  if (y + y_tilesize > (u32)screen_tex->height)
+  if (y + y_tilesize > guest_yres)
   {
-    *h = screen_tex->height - y;
+    *h = guest_yres - y;
   }
   else
   {
@@ -704,7 +713,7 @@ Bit8u * bx_3ds_gui_c::graphics_tile_get(unsigned x, unsigned y, unsigned *w, uns
   }
 
   Bit8u *dat = (Bit8u*) screen_fb;
-  return dat + (y * screen_tex->pow2_w * 4 + (x * 4));
+  return dat + (y * 400 * 4 + (x * 4));
 }
 
 void bx_3ds_gui_c::graphics_tile_update_in_place(unsigned x, unsigned y, unsigned w, unsigned h)
@@ -735,13 +744,9 @@ void bx_3ds_gui_c::dimension_update(unsigned x, unsigned y, unsigned fheight, un
   }
   else
   {
-    sf2d_free_texture(screen_tex);
-    screen_tex = sf2d_create_texture(x, y, TEXFMT_RGBA8, SF2D_PLACE_RAM);
-
-    linearFree(screen_fb);
-    screen_fb = linearAlloc(screen_tex->pow2_w * screen_tex->pow2_h * 4);
-    memset(screen_fb, 0, screen_tex->pow2_w * screen_tex->pow2_h * 4);
-    tile_screen();
+    free(screen_fb);
+    screen_fb = malloc(x * y * 4);
+    memset(screen_fb, 0, x * y * 4);
     screen_xscale = 400.0 / x;
     screen_yscale = 240.0 / y;
 
@@ -800,6 +805,7 @@ void bx_3ds_gui_c::show_ips(Bit32u ips_count)
 {
   ips_count /= 1000;
   sprintf(ips_text, "%u.%3.3u", ips_count / 1000, ips_count % 1000);
+  ips_update = true;
 }
 #endif
 

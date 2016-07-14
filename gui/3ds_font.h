@@ -11,12 +11,14 @@ struct FontStr
 class Font
 {
 public:
-	Font(sf2d_texture *backing, const u8 *dat);
-	void add_string(const char *c, FontStr &target);
-private:
+	Font(u8 *framebuffer, u16 width, u16 height, const u8 *dat);
+	void draw_string(int x, int y, const char *c);
 	void draw_char(int x, int y, char c);
-	sf2d_texture *tex;
+private:
+	u8 *fb;
 	const u8 *font_data;
 	int x;
 	int y;
+	u16 w;
+	u16 h;
 };

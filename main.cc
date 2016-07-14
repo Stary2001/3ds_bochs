@@ -308,7 +308,7 @@ void print_statistics_tree(bx_param_c *node, int level)
 int bxmain(void)
 {
 #if BX_WITH_3DS
-  gfxInitDefault();
+  gfxInit(GSP_RGBA8_OES, GSP_RGBA8_OES, false);
   consoleInit(GFX_BOTTOM, NULL);
 #endif
 
