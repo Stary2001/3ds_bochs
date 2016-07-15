@@ -413,6 +413,8 @@ void bx_3ds_gui_c::handle_events(void)
 
 void bx_3ds_gui_c::flush(void)
 {
+  tile_screen();
+  
   sf2d_start_frame(GFX_TOP, GFX_LEFT);
   if(current_screen_mode == SCR_SCALE)
   {
@@ -503,7 +505,6 @@ void bx_3ds_gui_c::flush(void)
 void bx_3ds_gui_c::clear_screen(void)
 {
   memset(screen_fb, 0, screen_tex->pow2_w * screen_tex->pow2_h * 4);
-  tile_screen();
 }
 
 void bx_3ds_gui_c::vga_draw_char(int x, int y, char c)
@@ -621,8 +622,6 @@ void bx_3ds_gui_c::text_update(Bit8u *old_text, Bit8u *new_text,
   } else {
     //curs_set(0);
   }
-
-  tile_screen();
 }
 
 
@@ -663,7 +662,6 @@ void bx_3ds_gui_c::graphics_tile_update(Bit8u *tile, unsigned x0, unsigned y0)
       i++;
     }
   }
-  tile_screen();
 }
 
 bx_svga_tileinfo_t * bx_3ds_gui_c::graphics_tile_info(bx_svga_tileinfo_t *info)
