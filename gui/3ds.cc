@@ -67,6 +67,7 @@ public:
   void draw_keyboard();
   void draw_key(int k);
   void draw_rectangle(int x, int y, int w, int h, u32 colour);
+  void draw_status();
 
   void vga_draw_char(int x, int y, char c);
   void font_draw_char(int x, int y, char c);
@@ -169,12 +170,6 @@ void bx_3ds_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
 
   font = new Font(bottom_fb, bottom_w, bottom_h, font_8x8_data);
 
-  static_strs[0] = "Current screen mode: ";
-  static_strs[1] = "Current input mode: ";
-  static_strs[2] = "Mouse disabled";
-  static_strs[3] = "Mouse enabled";
-  static_strs[4] = "IPS: ";
-
   shift = false;
   ctrl = false;
   alt = false;
@@ -186,11 +181,12 @@ void bx_3ds_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
   pan_x = 0;
   pan_y = 0;
 
-  ips_text = (char*)malloc(16);
-  sprintf(ips_text, "%u.%3.3u", 99, 9999);
+  ips_text = (char*)malloc(32);
+  sprintf(ips_text, "IPS: %u.%3.3uM", 99, 9999);
   ips_update = false;
 
   draw_keyboard();
+  draw_status();
 }
 
 bool aabb(int xp, int yp, int x, int y, int w, int h)
@@ -368,6 +364,8 @@ void bx_3ds_gui_c::handle_events(void)
 
   if((press | hold) & KEY_SELECT) // select pressed/held?
   {
+    int old = current_input_mode;
+
     if((press & KEY_L) && current_input_mode != 0)
     {
       current_input_mode--;
@@ -388,18 +386,25 @@ void bx_3ds_gui_c::handle_events(void)
       toggle_mouse_enable();
     }
 
-    memset(bottom_fb, 0, bottom_w * bottom_h * 4); // clear bottom screen..
-    if(current_input_mode == INP_KEYBOARD)
+    if(current_input_mode != old)
     {
-      draw_keyboard();
-    }
-    else if(current_input_mode == INP_MOUSE)
-    {
-      draw_mouse();
+      memset(bottom_fb, 0, bottom_w * bottom_h * 4); // clear bottom screen..
+      if(current_input_mode == INP_KEYBOARD)
+      {
+        draw_keyboard();
+      }
+      else if(current_input_mode == INP_MOUSE)
+      {
+        draw_mouse();
+      }
+
+      draw_status();
     }
   }
   else
   {
+    int old = current_screen_mode;
+
     if((press & KEY_L) && current_screen_mode != 0)
     {
       current_screen_mode--;
@@ -409,7 +414,11 @@ void bx_3ds_gui_c::handle_events(void)
     {
       current_screen_mode++;
     }
-    //clear_screen();
+
+    if(current_screen_mode != old)
+    {
+      draw_status();
+    }
   }
 
   u32 keys = KEY_A | KEY_B | KEY_X | KEY_Y | KEY_L | KEY_R;
@@ -470,47 +479,35 @@ void bx_3ds_gui_c::draw_mouse()
   draw_rectangle(160, 150, 150, 20, ((button_state & (1<<1)) != 0) ? 0xff0000ff : 0xff00ff00);
 }
 
+void bx_3ds_gui_c::draw_status()
+{
+  draw_rectangle(0, 200, 320, 32, 0xff000000); // Clear the status area with black.
+
+  font->draw_string(10, 200, "Current screen mode: ");
+  font->draw_string(10 + (21 * 8), 200, screen_mode_names[current_screen_mode]);
+
+  font->draw_string(10, 208, "Current input mode: ");
+  font->draw_string(10 + (20 * 8), 208, input_mode_names[current_input_mode]);
+
+  if(mouse_state)
+  {
+    font->draw_string(10, 216, "Mouse enabled");
+  }
+  else
+  {
+    font->draw_string(10, 216, "Mouse disabled");
+  }
+
+  font->draw_string(10, 224, ips_text);
+}
+
 void bx_3ds_gui_c::flush(void)
 {
-  /*sf2d_start_frame(GFX_TOP, GFX_LEFT);
-  if(current_screen_mode == SCR_SCALE)
+  if(ips_update)
   {
-    sf2d_draw_texture_scale(screen_tex, 0, 0, screen_xscale, screen_yscale);
+    draw_status();
+    ips_update = false;
   }
-  else if(current_screen_mode == SCR_PAN)
-  {
-    sf2d_draw_texture_part(screen_tex, 0, 0, pan_x, pan_y, 400, 240);
-  }
-  sf2d_end_frame();
-
-
-  FontStr curr = static_strs[0];
-  sf2d_draw_texture_part(font_tex, 10, 200, curr.x, curr.y, curr.w, curr.h);
-
-  FontStr mode_str = screen_mode_strs[current_screen_mode];
-  sf2d_draw_texture_part(font_tex, 10 + curr.w, 200, mode_str.x, mode_str.y, mode_str.w, mode_str.h);
-
-  curr = static_strs[1];
-  sf2d_draw_texture_part(font_tex, 10, 208, curr.x, curr.y, curr.w, curr.h);
-
-  mode_str = input_mode_strs[current_input_mode];
-  sf2d_draw_texture_part(font_tex, 10 + curr.w, 208, mode_str.x, mode_str.y, mode_str.w, mode_str.h);
-
-  FontStr mouse_str = static_strs[2 + (int)mouse_state];
-  sf2d_draw_texture_part(font_tex, 10, 216, mouse_str.x, mouse_str.y, mouse_str.w, mouse_str.h);
-
-  FontStr ips_str = static_strs[5];
-  sf2d_draw_texture_part(font_tex, 10, 224, ips_str.x, ips_str.y, ips_str.w, ips_str.h);
-
-  FontStr nums_str = static_strs[4];
-  int s_i = 0;
-  int s_off = 0;
-  int x = 10 + ips_str.w;
-
-  // draw ips_str
-
-  sf2d_end_frame();
-  sf2d_swapbuffers();*/
 }
 
 void bx_3ds_gui_c::clear_screen(void)
@@ -804,7 +801,7 @@ void bx_3ds_gui_c::mouse_enabled_changed_specific(bx_bool val)
 void bx_3ds_gui_c::show_ips(Bit32u ips_count)
 {
   ips_count /= 1000;
-  sprintf(ips_text, "%u.%3.3u", ips_count / 1000, ips_count % 1000);
+  sprintf(ips_text, "IPS: %u.%3.3uM", ips_count / 1000, ips_count % 1000);
   ips_update = true;
 }
 #endif

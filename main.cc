@@ -1037,7 +1037,8 @@ bx_bool load_and_init_display_lib(void)
   return true;
 }
 
-#if BX_WITH_3DS && BX_SHOW_IPS
+#if BX_WITH_3DS
+#if BX_SHOW_IPS
 bool bx_3ds_signal = false;
 bool bx_3ds_signal_run = true;
 
@@ -1057,6 +1058,7 @@ void sig_handler_thread_func(void *_)
       bx_3ds_signal = true;
   }
 }
+#endif
 #endif
 
 int bx_begin_simulation (int argc, char *argv[])
@@ -1097,13 +1099,17 @@ int bx_begin_simulation (int argc, char *argv[])
   }
 #endif
 
-#if BX_WITH_3DS && BX_SHOW_IPS
-	Thread sig_handler_thread = threadCreate(sig_handler_thread_func, nullptr, 0x2000, 0x20, 2, true);
-#endif
-
   BX_ASSERT(bx_cpu_count > 0);
 
   bx_init_hardware();
+
+#if BX_WITH_3DS
+#if BX_SHOW_IPS
+  BX_INFO(("starting thread...."));
+  Thread sig_handler_thread = threadCreate(sig_handler_thread_func, nullptr, 0x2000, 0x20, 2, true);
+  BX_INFO(("thread %08lx", (u32)sig_handler_thread));
+#endif
+#endif
 
   if (SIM->get_param_enum(BXPN_LOAD32BITOS_WHICH)->get()) {
     void bx_load32bitOSimagehack(void);
@@ -1187,8 +1193,14 @@ int bx_begin_simulation (int argc, char *argv[])
   }
 #endif /* BX_DEBUGGER == 0 */
   BX_INFO(("cpu loop quit, shutting down simulator"));
+  
+#if BX_WITH_3DS
+#if BX_SHOW_IPS
   bx_3ds_signal_run = false;
   threadJoin(sig_handler_thread, U64_MAX);
+#endif
+#endif
+
   bx_atexit();
   return(0);
 }
